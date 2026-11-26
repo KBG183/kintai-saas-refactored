@@ -14,7 +14,7 @@ param(
     [string]$System = "",
 
     [Parameter(Mandatory = $false)]
-    [string]$Model = "qwen3.8:27b",
+    [string]$Model = "qwen27b:latest",
 
     [Parameter(Mandatory = $false)]
     [int]$TimeoutSeconds = 300,

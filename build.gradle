@@ -39,8 +39,73 @@ dependencies {
 	testCompileOnly 'org.projectlombok:lombok'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 	testAnnotationProcessor 'org.projectlombok:lombok'
+	testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
+}
+
+tasks.register('verifyMyBatisSqlSafety') {
+	group = 'verification'
+	description = 'Verify MyBatis XML mappers do not use unsafe ${} interpolation without SAFE_DYNAMIC_SQL tag.'
+	doLast {
+		def mapperDir = file('src/main/resources/mapper')
+		if (!mapperDir.exists()) return
+		def violations = []
+		fileTree(dir: mapperDir, include: '**/*.xml').each { File f ->
+			def lines = f.readLines('UTF-8')
+			for (int i = 0; i < lines.size(); i++) {
+				def line = lines[i]
+				if (line.contains('${')) {
+					def prevLine = (i > 0) ? lines[i - 1] : ''
+					if (!line.contains('SAFE_DYNAMIC_SQL') && !prevLine.contains('SAFE_DYNAMIC_SQL')) {
+						violations.add("${f.name}:L${i + 1}: ${line.trim()}")
+					}
+				}
+			}
+		}
+		if (!violations.isEmpty()) {
+			throw new GradleException("MyBatis unsafe \${} interpolation detected:\n" + violations.join('\n'))
+		}
+	}
+}
+
+tasks.register('verifyZeroKorean') {
+	group = 'verification'
+	description = 'Verify tracked source, docs, and pipeline scripts contain no Korean Hangul characters.'
+	doLast {
+		def koreanPattern = ~/[\uAC00-\uD7A3]/
+		def violations = []
+		def scanTree = { File baseDir, List<String> includes, List<String> excludes = [] ->
+			if (!baseDir.exists()) return
+			fileTree(dir: baseDir, includes: includes, excludes: excludes).each { File f ->
+				if (f.name.contains('_KO')) return
+				def lines = f.readLines('UTF-8')
+				for (int i = 0; i < lines.size(); i++) {
+					if (lines[i] =~ koreanPattern) {
+						violations.add("${project.relativePath(f)}:L${i + 1}: ${lines[i].trim()}")
+					}
+				}
+			}
+		}
+		scanTree(file('src'), ['**/*.java', '**/*.xml', '**/*.sql', '**/*.html', '**/*.yaml', '**/*.yml'])
+		scanTree(file('docs'), ['**/*.md'], ['audit_runs/**', '**/audit_runs/**'])
+		def pipelineScript = file('tools/scripts/run_kintai_pipeline.ps1')
+		if (pipelineScript.exists()) {
+			def lines = pipelineScript.readLines('UTF-8')
+			for (int i = 0; i < lines.size(); i++) {
+				if (lines[i] =~ koreanPattern) {
+					violations.add("tools/scripts/run_kintai_pipeline.ps1:L${i + 1}: ${lines[i].trim()}")
+				}
+			}
+		}
+		if (!violations.isEmpty()) {
+			throw new GradleException("Zero-Korean gate failed:\n" + violations.join('\n'))
+		}
+	}
+}
+
+tasks.named('check') {
+	dependsOn 'verifyMyBatisSqlSafety', 'verifyZeroKorean'
 }

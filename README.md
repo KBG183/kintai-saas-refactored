@@ -1,7 +1,40 @@
-# 勤怠・シフト・給与管理システム (Kintai Management System)
+# KINTAI SaaS Refactored — 勤怠・給与管理リファクタリングおよび多層AI静的検証
 
-> **日本の労働基準法第37条に完全準拠した、飲食店・小売業向けシフト・勤怠・給与自動計算プラットフォーム**  
-> 複雑な深夜・時間外割増手当（125%・150%）の完全自動計算、4打刻による法令遵守の休憩時間管理、および排他制御（悲観的ロック）によるデータ整合性を実現した B2B エンタープライズソリューションです。
+[![KINTAI CI Gate](https://github.com/KBG183/kintai-saas-refactored/actions/workflows/ci.yml/badge.svg)](https://github.com/KBG183/kintai-saas-refactored/actions/workflows/ci.yml)
+[![Zero-Korean Gate](https://img.shields.io/badge/Zero--Korean-Passed-brightgreen.svg)]()
+[![Deterministic Gate](https://img.shields.io/badge/ArchUnit-Pass-blue.svg)]()
+[![Hybrid AI Pipeline](https://img.shields.io/badge/Pipeline-Qwen%2027B%20%7C%20Claude%20%7C%20Codex-orange.svg)]()
+
+> **日本の労働基準法第37条に準拠した、アルバイト勤怠・シフト・給与管理システム（リファクタリング成果物）**  
+> 
+> **Status: Phase 3 (欠陥是正・アーキテクチャ再設計・5層ハイブリッドAI自動検証パイプライン構築) 進行中**  
+> Phase 2の多層AI逆工学監査によって検出された重大欠陥（労基法第37条の境界計算・悲観的ロック並行競合・マルチテナント境界）を根本是正し、ArchUnit決定論的ゲートおよび自社GPU（RTX 5070 Ti）連携の5層Fail-Closed品質検証基盤を配備しました。
+
+---
+
+## 🧭 3段階エンジニアリング連携 (3-Phase Engineering Journey)
+
+> 📍 **現在の閲覧先: Phase 3 (kintai-saas-refactored)**  
+> 実務バックエンド開発（Phase 1）と多層AI交差検証（Phase 2）を経て、検出された重大欠陥の是正と自動検証パイプライン統合を行う**最終リポジトリ（現在地）**です。
+
+```mermaid
+flowchart LR
+    P1["【Phase 1: KINTAI Core】<br/>・Spring Boot 4 / MyBatis<br/>・店舗・シフト・勤怠・給与実装<br/>・98件のJUnit結合テスト検証<br/>（初期ベースライン）"] 
+    -->|"コード & DDL提供"| P2["【Phase 2: SRS Triad Auditor】<br/>・多層AI逆工学（3モデル交差監査）<br/>・確定給与不変性・労基法37条監査<br/>・全17要件のDiff乖離分析"]
+    -->|"欠陥検出 & 是正フィードバック"| P3["★【Phase 3: 現在地 / 本リポジトリ】<br/><b>KINTAI SaaS Refactored</b><br/>・労基法37条割増エンジンの厳密化<br/>・悲観的ロック並行競合防止<br/>・5層Fail-Closed検証パイプライン"]
+
+    style P1 fill:#1e293b,stroke:#475569,stroke-width:1px,color:#94a3b8
+    style P2 fill:#1e293b,stroke:#475569,stroke-width:1px,color:#94a3b8
+    style P3 fill:#0f3a5d,stroke:#38bdf8,stroke-width:3px,color:#ffffff
+```
+
+### 3段階プロジェクト連携概要
+
+| フェーズ | リポジトリ / 状態 | 役割とエンジニアリングの目的 |
+|:---:|---|---|
+| **Phase 1**<br>KINTAI Core | [KBG183/kintai-management](https://github.com/KBG183/kintai-management)<br>![Completed](https://img.shields.io/badge/Status-Completed-gray) | **初期バックエンド実装・As-Builtベースライン**<br>・Spring Boot / MyBatis による勤怠・シフト・給与ドメインの基本実装<br>・98件のJUnit結合テストによる機能担保と初期動作実績の確立 |
+| **Phase 2**<br>SRS Triad Auditor | [KBG183/Hybrid-srs-triad-auditor](https://github.com/KBG183/Hybrid-srs-triad-auditor)<br>![Completed](https://img.shields.io/badge/Status-Completed-gray) | **多層AI交差検証・SRS逆工学・マスターDiff分析**<br>・Codex, Claude, Qwen 27B, C#静的リンターによる多層監査網<br>・Phase 1コードからSRSを逆生成し、全17要件のギャップおよび境界条件の欠陥を摘発 |
+| **Phase 3**<br>★ **現在地** | **[KBG183/kintai-saas-refactored](https://github.com/KBG183/kintai-saas-refactored)**<br>![Current Repository](https://img.shields.io/badge/Status-Active%20(Current%20Repo)-brightgreen) | **欠陥是正・アーキテクチャ再設計・5層AI自動検証（本リポジトリ）**<br>・労基法37条 6段階法定割増エンジン再設計（`BigDecimal`・50銭端数処理厳格化）<br>・シフト確定時の悲観的ロック（`SELECT ... FOR UPDATE`）同時実行制御<br>・GitHub Actions CI + 自社GPU Qwen 27B + Cloud AI Fail-Closed 統合ゲート |
 
 ---
 
@@ -27,7 +60,7 @@
 
 | カテゴリ | 採用技術 | 選定理由・役割 |
 | :--- | :--- | :--- |
-| **Backend** | Java 17, Spring Boot 3.x / 4.x | 高い型安全性、堅牢なエンタープライズバックエンド構築 |
+| **Backend** | Java 17, Spring Boot 3.x / 4.x | 高い型安全性、堅牢なバックエンド構築 |
 | **ORM / Mapper**| MyBatis 3.x | 複雑な労働時間集計クエリおよび排他ロック（FOR UPDATE）の制御最適化 |
 | **Database** | MySQL 8.0 | トランザクション分離（InnoDB）、インデックス最適化 |
 | **Security** | Spring Security 6 | セッションベースのロール制御（管理者: `OWNER`, 従業員: `STAFF`） |
@@ -126,6 +159,39 @@ erDiagram
 
 ---
 
+## 🛡️ 品質保証および自動検証パイプライン (Quality Assurance & CI Gate)
+
+本システムは、給与計算ミス（法令違反）や並行処理競合の発生を未然に防止するため、二重の自動検証アーキテクチャを導入しています。
+
+### 1. 決定論的品質ゲート（GitHub Actions CI）
+プルリクエストおよびコミットごとに、GitHub Actions 上で `./gradlew check` が自動実行されます。
+- **ArchUnit によるアーキテクチャ不変条件の機械検証 (`KintaiArchitectureTest.java`)**:
+  - 給与ドメインおよびサービス層における浮動小数点型（`double`, `float`）の使用を全面禁止（`BigDecimal` 必須）。
+  - コントローラー層によるマッパー層への直接アクセス禁止（サービス層による業務カプセル化の強制）。
+  - MyBatis マッパーのインターフェース規約強制。
+- **MyBatis SQLインジェクション静的検知**:
+  - 全マッパー XML を走査し、不安全な文字列置換 `${}` の混入を自動検知・ビルド遮断。
+- **Zero-Korean 静的検証**:
+  - 公開成果物・ソースコードへの不要な非日本語コメント・ログ混入を機械的に遮断。
+
+### 2. 5層ハイブリッドAI交差検証システム (5-Tier Hybrid AI Pipeline)
+自社GPU（NVIDIA RTX 5070 Ti）によるローカル LLM（Qwen 27B）とクラウド AI（Claude, OpenAI Codex）を連携させた多重監査パイプライン（`run_kintai_pipeline.ps1`）を運用しています。
+
+```mermaid
+flowchart TD
+    A["Stage 1: Deterministic Gate<br>(./gradlew check: Compile / JUnit 5 / ArchUnit)"] --> B["Stage 2: Local Qwen 27B Funnel Screening<br>(git diff 自動解析 + 3大専門監査プロンプト注入)"]
+    B --> C["Stage 3: Cloud AI Cross-Audit<br>(Claude: 労働法第37条 / Codex: 悲観的ロック並行制御)"]
+    C --> D["Stage 4: Proof-First Citation Verifier<br>(実コード行番号・ハッシュ改ざん照合)"]
+    D --> E["Stage 5: Fail-Closed Gate<br>(P0/P1重大欠陥検出時の自動ビルド・コミット遮断)"]
+```
+
+- **ドメイン対応専門監査プロンプト (`tools/prompts/`)**:
+  - `audit_labor_law_37.md`: 労働基準法第37条の6段階割増率および50銭端数処理の監査。
+  - `audit_concurrency_lock.md`: 悲観的ロック（`SELECT ... FOR UPDATE`）およびデッドロック順序の監査。
+  - `audit_idor_security.md`: Spring Security 6 RBAC認可およびテナント分離（IDOR防御）の監査。
+
+---
+
 ## 🚀 クイックスタート (Local Setup)
 
 ### 前提条件
@@ -134,8 +200,8 @@ erDiagram
 
 ### 1. リポジトリのクローン
 ```bash
-git clone -b develop https://github.com/KBG183/kintai-management.git
-cd kintai-management/kintai
+git clone https://github.com/KBG183/kintai-saas-refactored.git
+cd kintai-saas-refactored
 ```
 
 ### 2. データベース設定
@@ -146,10 +212,10 @@ spring.datasource.username=YOUR_USERNAME
 spring.datasource.password=YOUR_PASSWORD
 ```
 
-### 3. ビルドおよび起動
+### 3. ビルドおよび品質検証
 ```bash
-# ビルド
-./gradlew build -x test
+# 決定論的静的検証および単体テストの実行 (ArchUnit, SQL安全検証含む)
+./gradlew check
 
 # アプリケーション起動
 ./gradlew bootRun

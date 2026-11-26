@@ -40,4 +40,6 @@ out/
 scratch/
 *_KO*
 docs/audit_runs/
+audit/runs/
+docs/daily_audit_temp.log
 

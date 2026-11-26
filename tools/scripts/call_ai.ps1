@@ -253,7 +253,7 @@ try {
             }
         }
         "Qwen" {
-            if (-not $effectiveModel) { $effectiveModel = "qwen3.8:27b" }
+            if (-not $effectiveModel) { $effectiveModel = "qwen27b:latest" }
             if (-not $Quiet) { Write-Host "[AI-RUNNER] Launching Local Qwen 27B ($effectiveModel via RTX 5070 Ti)..." -ForegroundColor Cyan }
 
             $hermesScript = Join-Path $env:USERPROFILE ".gemini\scripts\audit_with_hermes.ps1"
