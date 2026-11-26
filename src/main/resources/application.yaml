@@ -1,0 +1,26 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/kintai_db?useSSL=false&serverTimezone=Asia/Tokyo&characterEncoding=UTF-8&allowPublicKeyRetrieval=true
+    username: root
+    password: 1234  # 環境に合わせて変更してください
+
+  thymeleaf:
+    cache: false # 開発環境用キャッシュ無効化
+
+# MyBatis 連携設定
+mybatis:
+  mapper-locations: classpath:mapper/**/*.xml
+  type-aliases-package: com.example.kintai.domain
+  configuration:
+    map-underscore-to-camel-case: true # DBカラム（snake_case）から Java（camelCase）への自動マッピング
+    default-fetch-size: 100
+
+# 日本の労働基準法・税法法定基準値設定（2026年10月改正基準）
+kintai:
+  legal:
+    min-hourly-wage: 1280        # 東京都最低賃金 (2026年10月改定基準)
+    tax-barrier-default: 1230000 # 年収の壁（配偶者控除・扶養控除基準: 123万円）
