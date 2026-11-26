@@ -1,0 +1,943 @@
+﻿**監査結果は FAIL です。** 最も重大な指摘は `AttendanceService.reviewModification` です。`PENDING` の判定が職員ロックの取得前にあり、同じ申請を待機していた後続トランザクションも承認処理に進めます。特に打刻漏れ申請では、承認状態の更新より先に新しい勤怠を登録するため、状態更新だけを条件付きにしても、その失敗でトランザクション全体をロールバックしなければ重複登録を防げません。
+
+提示された3ファイルを静的に監査しました。ローカルのファイル一覧取得は実行ポリシーにより拒否されたため、Mapper SQL、DDL、DB分離レベル、MyBatisキャッシュ設定および実DBでの競合結果は未確認です。以下では設定やSQLに依存する指摘に、その成立条件を明記します。
+
+| Finding ID | Severity | Item | Flaw Analysis | Concrete Code/Rule Fix |
+|---|---|---|---|---|
+| ATT-01 | High | `reviewModification` の二重承認 | 2件の処理がともにロック前に `PENDING` を読めます。後続処理は職員ロック取得後に申請を再検証せず、勤怠登録・更新または却下に進みます。最終状態更新の件数も検証していません。 | 事前取得を職員IDに限定し、`store_staff` → 修正申請行の順でロックします。申請行の最新状態が `PENDING` の場合のみ処理し、最終更新にも `WHERE approval_status = 'PENDING'` を付け、更新件数が1以外なら例外で全体をロールバックしてください。 |
+| ATT-02 | High | `requestModification` がロックする職員と更新対象の不一致 | 要求DTOの職員・勤務日でロックと給与確定チェックを行いますが、`attendanceId` で取得した元勤怠との職員・勤務日の一致を検証していません。不一致の申請が届くと、承認時にも申請側の職員をロックしたまま別の勤怠を更新し得ます。 | 既存勤怠の修正では、認可済み店舗・職員で対象を限定し、職員ロック取得後に対象勤怠をロックして所属と勤務日を照合してください。給与確定チェックには照合済みの値を使い、対象消失時も例外にしてください。 |
+| ATT-03 | High（設定依存） | `forceCloseAttendance` の再読込 | 事前の `findById` が非ロック読取なら、職員を先にロックする順序は妥当です。ただし取得後も同じ `findById` を呼んでいます。MyBatisのセッションキャッシュやDBの反復可能読取によって古い `ON_BREAK` を再利用すると、待機中に完了した休憩を再登録し得ます。 | 事前照会は職員IDだけにし、職員ロック後は専用の `findByIdForUpdate` で勤怠行を現在読取してください。その結果が `COMPLETED` なら即時返却します。強制締めと通常の休憩終了を別トランザクションで競合させ、休憩行数と終了時刻を検証してください。 |
+| SHF-01 | High（SQL・分離レベル依存） | `requestShift` と `confirmShift` の重複検査 | `requestShift` は職員ロック後に重複検査と登録を行います。一方、`confirmShift` は先に `findById` を実行します。これがスナップショットを確立し、`existsOverlapShift` も同じスナップショットを読む構成では、ロック待機中に別シフトへ確定された時間帯を見落とせます。 | 両経路で同じ職員行の取得成功を必須にし、確定時は職員 → 対象シフトの順でロックしてください。重複判定が直前のコミットを読めるSQL・分離レベルを選び、前日開始の夜勤も含めて `既存開始 < 新終了 AND 既存終了 > 新開始` を検証してください。 |
+| PAY-01 | High（SQL・分離レベル依存） | `confirmPayroll` の確定時再計算 | 再計算内の `findByStaffAndMonthForUpdate` は、実際にロック読取なら二重確定を防ぐ有効なガードです。一方、先頭の `findById` が作ったスナップショットを後続の通常読取が使う構成では、待機中にコミットされた勤怠・未処理申請を見落としたまま金額を確定し得ます。 | 職員ロック後に給与行をロックし、対象ID・期間・`DRAFT` をその行で検証してください。確定用の勤怠・未処理件数も同じ職員ロックの下で最新コミットを読むよう統一し、待機中に勤怠修正がコミットされるケースを検証してください。 |
+| PAY-02 | Medium | 給与の確定・支払更新件数 | `confirmPayroll` は `updatePayrollStatusConfirm` の更新件数を検証していません。0件でも再計算した明細をコミットして正常終了し得ます。`payPayroll` は0件を検出しますが、`CONFIRMED` 判定に使うDTOはロック取得前のものです。支払の二重更新防止は未確認のSQL条件に依存します。 | 確定は `id = ? AND status = 'DRAFT'`、支払は `id = ? AND status = 'CONFIRMED'` を更新条件にし、どちらも更新件数が厳密に1であることを確認してください。ロック前の状態を支払可否の最終根拠にしないでください。 |
+| PAY-03 | Medium（取得順依存） | `calculateMonthlyPayroll` の複数職員ロック | 一括計算全体が1トランザクションです。同一クラス内の `calculatePayrollForStaff` 呼出しは外側のトランザクションで動作し、先に取得した職員ロックも月次処理終了まで保持します。並行バッチの職員取得順が異なると循環待ちが成立します。 | 一括ロールバックを維持する場合は、全バッチで職員IDを一意な昇順に固定してからロックしてください。個別計算と一括計算の両方で `store_staff` → 給与行の順序を統一してください。 |
+| DB-01 | 要検証 | Mapper SQL・DDL・トランザクション境界 | 提示された書込用公開メソッドには `@Transactional` があります。ただし、メソッド名だけでは `FOR UPDATE` の実行、対象職員行の存在、給与Upsertの一意キー、全Mapperの同一トランザクション参加を確認できません。職員行の取得結果もサービス側では検査していません。 | 実MapperとDDLで職員主キーによる1行ロック、給与の `(store_staff_id, target_year_month)` 一意制約、状態付き更新を照合してください。実運用と同じDB・分離レベルの独立した2接続で、待機後に先行コミットが見えることと、条件付き更新失敗時に明細までロールバックされることを確認してください。 |
+
+VERDICT: FAIL
+
+OpenAI Codex v0.167.0-alpha.4.1
+--------
+workdir: C:\Users\klad3\OneDrive\바탕 화면\IT\프로젝트\kintai-refactored\scratch\runs\unified_20261126_160503_27372_codex
+model: gpt-6.2-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 01a216ac-0c31-7f00-be2e-0d27fe165fbd
+--------
+user
+### CONTEXT SPECIFICATION:
+=== FILE: ShiftService.java ===
+package com.example.kintai.domain.shift.service;
+
+import com.example.kintai.domain.shift.dto.CalendarEventDto;
+import com.example.kintai.domain.shift.dto.ShiftConfirmDto;
+import com.example.kintai.domain.shift.dto.ShiftDto;
+import com.example.kintai.domain.shift.dto.ShiftRequestDto;
+import com.example.kintai.domain.shift.mapper.ShiftMapper;
+import com.example.kintai.global.common.TimeUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.List;
+
+@Service
+@Transactional(readOnly = true)
+public class ShiftService {
+
+    private final ShiftMapper shiftMapper;
+
+    public ShiftService(ShiftMapper shiftMapper) {
+        this.shiftMapper = shiftMapper;
+    }
+
+    /**
+     * 月間カレンダー用シフトイベント一覧取得
+     */
+    public List<CalendarEventDto> getCalendarEvents(Long storeId, LocalDate startDate, LocalDate endDate) {
+        List<ShiftDto> shifts = shiftMapper.findShiftEvents(storeId, startDate, endDate);
+        return shifts.stream()
+                .map(CalendarEventDto::from)
+                .toList();
+    }
+
+    /**
+     * スタッフによる希望シフト提出
+     */
+    @Transactional
+    public Long requestShift(ShiftRequestDto requestDto) {
+        // 排他制御: 悲観的ロックによる直列化
+        shiftMapper.lockStoreStaffForUpdate(requestDto.getStoreStaffId());
+
+        LocalDate workDate = requestDto.getWorkDate();
+        LocalTime startLocalTime = LocalTime.parse(requestDto.getRequestedStartTime());
+        LocalTime endLocalTime = LocalTime.parse(requestDto.getRequestedEndTime());
+
+        LocalDateTime startAt = LocalDateTime.of(workDate, startLocalTime);
+        LocalDateTime endAt = TimeUtils.resolveEndDateTime(workDate, requestDto.getRequestedStartTime(), requestDto.getRequestedEndTime());
+
+        // 16時間超過検証の精度担保（Duration.compareToによる正確な比較）
+        if (Duration.between(startAt, endAt).compareTo(Duration.ofHours(16)) > 0) {
+            throw new IllegalArgumentException("1回のシフト時間は最大16時間以内である必要があります。");
+        }
+
+        // 重複シフト検証
+        if (shiftMapper.existsOverlapShift(requestDto.getStoreStaffId(), workDate, startAt, endAt, null)) {
+            throw new IllegalStateException("指定された時間帯に既に別のシフトが存在します。");
+        }
+
+        ShiftDto shift = new ShiftDto();
+        shift.setStoreId(requestDto.getStoreId());
+        shift.setStoreStaffId(requestDto.getStoreStaffId());
+        shift.setWorkDate(workDate);
+        shift.setRequestedStartAt(startAt);
+        shift.setRequestedEndAt(endAt);
+        shift.setPlannedBreakMinutes(0);
+        shift.setStatus("SUBMITTED");
+        shift.setStaffMemo(requestDto.getStaffMemo());
+
+        shiftMapper.insertShift(shift);
+        return shift.getShiftId();
+    }
+
+    /**
+     * 店長によるシフト確定および法定休憩時間の検証
+     */
+    @Transactional
+    public void confirmShift(Long shiftId, ShiftConfirmDto confirmDto) {
+        ShiftDto existing = shiftMapper.findById(shiftId);
+        if (existing == null) {
+            throw new IllegalArgumentException("存在しないシフトです。(ID: " + shiftId + ")");
+        }
+
+        // 排他制御: シフト確定の競合を防止する悲観的ロック (store_staff 単位直列化)
+        shiftMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
+
+        LocalDate workDate = existing.getWorkDate();
+        LocalDateTime confirmedStartAt = LocalDateTime.of(workDate, LocalTime.parse(confirmDto.getConfirmedStartTime()));
+        LocalDateTime confirmedEndAt = TimeUtils.resolveEndDateTime(workDate, confirmDto.getConfirmedStartTime(), confirmDto.getConfirmedEndTime());
+
+        // 16時間超過検証
+        if (Duration.between(confirmedStartAt, confirmedEndAt).compareTo(Duration.ofHours(16)) > 0) {
+            throw new IllegalArgumentException("1回のシフト時間は最大16時間以内である必要があります。");
+        }
+
+        // 重複シフト検証（自身を除く）
+        if (shiftMapper.existsOverlapShift(existing.getStoreStaffId(), workDate, confirmedStartAt, confirmedEndAt, shiftId)) {
+            throw new IllegalStateException("指定された確定時間帯に他のシフトと重複が発生します。");
+        }
+
+        // 日本労働基準法第34条に基づく休憩時間計算 (6時間超45分、8時間超60分)
+        int plannedBreak = (confirmDto.getPlannedBreakMinutes() != null)
+                ? confirmDto.getPlannedBreakMinutes()
+                : calculateRecommendedBreakMinutes(confirmedStartAt, confirmedEndAt);
+
+        existing.setConfirmedStartAt(confirmedStartAt);
+        existing.setConfirmedEndAt(confirmedEndAt);
+        existing.setPlannedBreakMinutes(plannedBreak);
+        existing.setStatus("CONFIRMED");
+        existing.setOwnerMemo(confirmDto.getOwnerMemo());
+
+        shiftMapper.updateShiftConfirm(existing);
+    }
+
+    /**
+     * 日本労働基準法第34条 休憩時間推奨算定
+     */
+    public int calculateRecommendedBreakMinutes(LocalDateTime startAt, LocalDateTime endAt) {
+        long grossMinutes = Duration.between(startAt, endAt).toMinutes();
+        if (grossMinutes <= 360) {
+            return 0; // 6時間以下
+        } else if (grossMinutes <= 525) {
+            return 45; // 6時間超 8時間以下 (滞在 525分 - 45分 = 実働 480分=8時間)
+        } else {
+            return 60; // 8時間超
+        }
+    }
+}
+
+
+=== FILE: PayrollService.java ===
+package com.example.kintai.domain.payroll.service;
+
+import com.example.kintai.domain.attendance.dto.AttendanceDto;
+import com.example.kintai.domain.attendance.mapper.AttendanceMapper;
+import com.example.kintai.domain.payroll.dto.*;
+import com.example.kintai.domain.payroll.mapper.PayrollMapper;
+import com.example.kintai.domain.payroll.util.PayrollCalculator;
+import com.example.kintai.domain.payroll.util.PayrollExcelExporter;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.IOException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+
+@Service
+@Transactional(readOnly = true)
+public class PayrollService {
+
+    private final PayrollMapper payrollMapper;
+    private final AttendanceMapper attendanceMapper;
+
+    public PayrollService(PayrollMapper payrollMapper, AttendanceMapper attendanceMapper) {
+        this.payrollMapper = payrollMapper;
+        this.attendanceMapper = attendanceMapper;
+    }
+
+    public List<PayrollDto> getPayrollsByStoreAndMonth(Long storeId, String targetYearMonth) {
+        return payrollMapper.findPayrollsByStoreAndMonth(storeId, targetYearMonth);
+    }
+
+    /**
+     * 月別給与の一括集計および計算 (Upsert)
+     */
+    @Transactional
+    public void calculateMonthlyPayroll(Long storeId, String targetYearMonth) {
+        Integer cutoffDay = payrollMapper.getPayCutoffDayByStoreId(storeId);
+        int payCutoffDay = (cutoffDay != null) ? cutoffDay : 99;
+
+        PayrollCalculator.DateRange range = PayrollCalculator.resolveDateRange(targetYearMonth, payCutoffDay);
+        LocalDate startDate = range.startDate();
+        LocalDate endDate = range.endDate();
+
+        List<Long> staffIds = payrollMapper.findActiveStaffIdsByStoreId(storeId);
+
+        for (Long staffId : staffIds) {
+            calculatePayrollForStaff(storeId, staffId, targetYearMonth, startDate, endDate);
+        }
+    }
+
+    @Transactional
+    public PayrollDto calculatePayrollForStaff(Long storeId, Long staffId, String targetYearMonth, LocalDate startDate, LocalDate endDate) {
+        // 排他制御: 同時計算競合を防止する悲観的ロック (Level 1: store_staff)
+        payrollMapper.lockStoreStaffForUpdate(staffId);
+
+        // 不変性検証: 既に確定(CONFIRMED)または支払済(PAID)の給与データが存在する場合は再計算・上書きを遮断
+        PayrollDto existingPayroll = payrollMapper.findByStaffAndMonthForUpdate(staffId, targetYearMonth);
+        if (existingPayroll != null && !"DRAFT".equals(existingPayroll.getPayrollStatus())) {
+            throw new IllegalStateException("既に確定または支払済みの給与データは再計算・上書きできません。(状態: " + existingPayroll.getPayrollStatus() + ")");
+        }
+
+        // 未処理勤怠の確認（打刻途中や未承認申請がある場合は計算中断）
+        int unresolvedCount = payrollMapper.countUnresolvedAttendance(staffId, startDate, endDate);
+        if (unresolvedCount > 0) {
+            throw new IllegalStateException("未承認または打刻途中の勤怠が存在するため、給与計算を中断しました。(職員ID: " + staffId + ")");
+        }
+
+        List<AttendanceDto> attendances = attendanceMapper.findCompletedAttendancesForStaffAndPeriod(staffId, startDate, endDate);
+
+        // 通勤手当上限額（1回の精算あたりの上限）の取得
+        Integer transportLimitVal = payrollMapper.findTransportLimitForStaffOnDate(staffId, endDate);
+        int transportLimit = (transportLimitVal != null) ? transportLimitVal : 15000;
+
+        int totalWorkMinutes = 0;
+        int totalNightMinutes = 0;
+        int totalOvertimeMinutes = 0;
+        int totalBasePay = 0;
+        int totalNightAllowance = 0;
+        int totalOvertimeAllowance = 0;
+        int totalTransportAllowance = 0;
+
+        Set<Integer> uniqueWages = new HashSet<>();
+        Set<LocalDate> workedDates = new HashSet<>();
+
+        List<PayrollDailyDetailDto> detailsToInsert = new ArrayList<>();
+
+        for (AttendanceDto att : attendances) {
+            LocalDate workDate = att.getWorkDate();
+            Integer hourlyWageVal = payrollMapper.findHourlyWageForStaffOnDate(staffId, workDate);
+            if (hourlyWageVal == null || hourlyWageVal <= 0) {
+                throw new IllegalStateException("勤務日 (" + workDate + ") に有効な契約時給データが存在しません。");
+            }
+            int hourlyWage = hourlyWageVal;
+            uniqueWages.add(hourlyWage);
+
+            // 有効な契約時給 (1円以上の正数) を検証
+            if (hourlyWage <= 0) {
+                throw new IllegalStateException("勤務日 (" + workDate + ") の契約時給が無効です。(時給: " + hourlyWage + "円)");
+            }
+
+            // 日別計算（端数は HALF_UP で厳密に丸め）
+            PayrollCalculator.DailyPayResult dailyPay = PayrollCalculator.calculateDailyPay(
+                    hourlyWage,
+                    att.getNetWorkMinutes(),
+                    att.getNightWorkMinutes(),
+                    att.getOvertimeMinutes()
+            );
+
+            // 1日1回通勤手当支給および月額上限枠内での配分
+            int transportAmount = 0;
+            if (!workedDates.contains(workDate)) {
+                workedDates.add(workDate);
+                Integer dailyTransportVal = payrollMapper.findDailyTransportFeeForStaffOnDate(staffId, workDate);
+                int dailyTransport = (dailyTransportVal != null) ? dailyTransportVal : 0;
+                int remainingLimit = Math.max(0, transportLimit - totalTransportAllowance);
+                transportAmount = Math.min(dailyTransport, remainingLimit);
+                totalTransportAllowance += transportAmount;
+            }
+
+            totalWorkMinutes += att.getNetWorkMinutes();
+            totalNightMinutes += att.getNightWorkMinutes();
+            totalOvertimeMinutes += att.getOvertimeMinutes();
+            totalBasePay += dailyPay.basePay();
+            totalNightAllowance += dailyPay.nightAllowance();
+            // 留意: 割増率は加算方式（深夜25% + 残業25% = 50%）のため、二重加算を防止し overtime と holiday を集計
+            totalOvertimeAllowance += dailyPay.overtimeAllowance() + dailyPay.holidayAllowance();
+
+            PayrollDailyDetailDto detail = new PayrollDailyDetailDto();
+            detail.setAttendanceId(att.getAttendanceId());
+            detail.setWorkDate(workDate);
+            detail.setAppliedHourlyWage(hourlyWage);
+            detail.setTotalBreakMinutes(att.getTotalBreakMinutes());
+            detail.setNetWorkMinutes(att.getNetWorkMinutes());
+            detail.setNightWorkMinutes(att.getNightWorkMinutes());
+            detail.setOvertimeMinutes(att.getOvertimeMinutes());
+            detail.setNightOvertimeMinutes(dailyPay.nightOvertimeMinutes());
+            detail.setBasePay(dailyPay.basePay());
+            detail.setNightAllowance(dailyPay.nightAllowance());
+            detail.setOvertimeAllowance(dailyPay.overtimeAllowance());
+            detail.setTransportAmount(transportAmount);
+
+            detailsToInsert.add(detail);
+        }
+
+        Integer appliedHourlyWage = (uniqueWages.size() == 1) ? uniqueWages.iterator().next() : null;
+
+        // 労働基準法第37条第1項但書: 月60時間超法定時間外労働割増 (25%追加加算 = 計50%割増、深夜重複時は計75%割増/175%支給)
+        // 累積3,600分 (60時間) を超える残業分に対して追加法定割増 (時給 * 0.25) を一括加算
+        int over60OvertimeAllowance = 0;
+        if (totalOvertimeMinutes > 3600 && appliedHourlyWage != null && appliedHourlyWage > 0) {
+            int excessMinutes = totalOvertimeMinutes - 3600;
+            // 追加25%割増: appliedHourlyWage * 0.25 * excessMinutes / 60 = appliedHourlyWage * excessMinutes / 240
+            over60OvertimeAllowance = PayrollCalculator.yenRound(
+                    java.math.BigDecimal.valueOf(appliedHourlyWage).multiply(java.math.BigDecimal.valueOf(excessMinutes)),
+                    240
+            );
+            totalOvertimeAllowance += over60OvertimeAllowance;
+        }
+
+        int grossPay = totalBasePay + totalNightAllowance + totalOvertimeAllowance + totalTransportAllowance;
+
+        PayrollDto payroll = new PayrollDto();
+        payroll.setStoreId(storeId);
+        payroll.setStoreStaffId(staffId);
+        payroll.setTargetYearMonth(targetYearMonth);
+        payroll.setRangeStartDate(startDate);
+        payroll.setRangeEndDate(endDate);
+        payroll.setWorkDaysCount(workedDates.size());
+        payroll.setTotalWorkMinutes(totalWorkMinutes);
+        payroll.setTotalNightMinutes(totalNightMinutes);
+        payroll.setTotalOvertimeMinutes(totalOvertimeMinutes);
+        payroll.setAppliedHourlyWage(appliedHourlyWage);
+        payroll.setAppliedTransportLimit(transportLimit);
+        payroll.setBasePay(totalBasePay);
+        payroll.setNightAllowance(totalNightAllowance);
+        payroll.setOvertimeAllowance(totalOvertimeAllowance);
+        payroll.setTransportAllowance(totalTransportAllowance);
+        payroll.setGrossPay(grossPay);
+        payroll.setPayrollStatus("DRAFT");
+
+        payrollMapper.upsertPayroll(payroll);
+
+        // 日別詳細スナップショットの再保存
+        payrollMapper.deleteDailyDetailsByPayrollId(payroll.getPayrollId());
+        for (PayrollDailyDetailDto detail : detailsToInsert) {
+            detail.setPayrollId(payroll.getPayrollId());
+            payrollMapper.insertPayrollDailyDetail(detail);
+        }
+
+        return payroll;
+    }
+
+    /**
+     * 給与確定ロック処理（帳簿の不変性を保証）
+     */
+    @Transactional
+    public void confirmPayroll(Long payrollId, PayrollConfirmRequestDto confirmDto) {
+        PayrollDto existing = payrollMapper.findById(payrollId);
+        if (existing == null) {
+            throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
+        }
+
+        if (!"DRAFT".equals(existing.getPayrollStatus())) {
+            throw new IllegalStateException("既に確定済みの給与データです。");
+        }
+
+        // 排他制御: 悲観的ロック
+        payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
+
+        // 精算対象期間終了の検証（締め期間終了前の早期確定を防止, JSTタイムゾーン基準）
+        LocalDate todayJst = LocalDate.now(ZoneId.of("Asia/Tokyo"));
+        if (!todayJst.isAfter(existing.getRangeEndDate())) {
+            throw new IllegalStateException("精算対象期間 (" + existing.getRangeEndDate() + ") が終了する前に給与を確定することはできません。");
+        }
+
+        // 未処理勤怠の確認
+        int unresolved = payrollMapper.countUnresolvedAttendance(existing.getStoreStaffId(), existing.getRangeStartDate(), existing.getRangeEndDate());
+        if (unresolved > 0) {
+            throw new IllegalStateException("未処理の勤怠修正申請または勤務中打刻が存在するため、確定できません。");
+        }
+
+        // 最新データによる再計算
+        PayrollDto recalculated = calculatePayrollForStaff(
+                existing.getStoreId(),
+                existing.getStoreStaffId(),
+                existing.getTargetYearMonth(),
+                existing.getRangeStartDate(),
+                existing.getRangeEndDate()
+        );
+
+        // 店長が確認した金額と再計算金額の不一致チェック
+        if (confirmDto != null && confirmDto.getExpectedGrossPay() != null) {
+            int expected = confirmDto.getExpectedGrossPay();
+            int actual = recalculated.getGrossPay();
+            if (expected != actual) {
+                throw new IllegalStateException("確認時と金額が一致しません。(確認額: " + expected + "円, 再計算額: " + actual + "円)。再確認が必要です。");
+            }
+        }
+
+        payrollMapper.updatePayrollStatusConfirm(payrollId, LocalDateTime.now());
+    }
+
+    /**
+     * 給与支払確定処理 (Level 1: store_staff -> Level 2: payroll の階層型ロック保証)
+     */
+    @Transactional
+    public void payPayroll(Long payrollId) {
+        PayrollDto existing = payrollMapper.findById(payrollId);
+        if (existing == null) {
+            throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
+        }
+
+        // 階層型排他制御: Level 1 store_staff ロック
+        payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
+
+        if (!"CONFIRMED".equals(existing.getPayrollStatus())) {
+            throw new IllegalStateException("確定(CONFIRMED)状態の給与データのみ支払処理が可能です。(現在の状態: " + existing.getPayrollStatus() + ")");
+        }
+
+        int updated = payrollMapper.updatePayrollStatusPaid(payrollId, LocalDateTime.now());
+        if (updated == 0) {
+            throw new IllegalStateException("給与支払ステータスの更新に失敗しました。既に支払済か競合が発生しています。(ID: " + payrollId + ")");
+        }
+    }
+
+    /**
+     * スタッフ個人別給与明細詳細モーダル用データ取得
+     */
+    public PayrollDetailResponseDto getPayrollDetail(Long payrollId) {
+        PayrollDto payroll = payrollMapper.findById(payrollId);
+        if (payroll == null) {
+            throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
+        }
+
+        List<PayrollDailyDetailDto> details = payrollMapper.findDailyDetailsByPayrollId(payrollId);
+
+        PayrollDetailResponseDto response = new PayrollDetailResponseDto();
+        response.setPayrollId(payroll.getPayrollId());
+        response.setStaffName(payroll.getStaffName());
+        response.setTargetYearMonth(payroll.getTargetYearMonth());
+        response.setAppliedHourlyWage(payroll.getAppliedHourlyWage());
+
+        PayrollDetailResponseDto.PayrollSummary summary = new PayrollDetailResponseDto.PayrollSummary();
+        summary.setWorkDaysCount(payroll.getWorkDaysCount());
+        summary.setTotalWorkMinutes(payroll.getTotalWorkMinutes());
+        summary.setTotalNightMinutes(payroll.getTotalNightMinutes());
+        summary.setTotalOvertimeMinutes(payroll.getTotalOvertimeMinutes());
+        summary.setBasePay(payroll.getBasePay());
+        summary.setNightAllowance(payroll.getNightAllowance());
+        summary.setOvertimeAllowance(payroll.getOvertimeAllowance());
+        summary.setTransportAllowance(payroll.getTransportAllowance());
+        summary.setGrossPay(payroll.getGrossPay());
+        summary.setPayrollStatus(payroll.getPayrollStatus());
+        response.setSummary(summary);
+
+        DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm");
+        List<PayrollDetailResponseDto.DailyAttendanceDetail> dailyList = new ArrayList<>();
+
+        for (PayrollDailyDetailDto d : details) {
+            PayrollDetailResponseDto.DailyAttendanceDetail daily = new PayrollDetailResponseDto.DailyAttendanceDetail();
+            daily.setWorkDate(d.getWorkDate().toString());
+            daily.setBreakMinutes(d.getTotalBreakMinutes());
+            daily.setNetWorkMinutes(d.getNetWorkMinutes());
+            daily.setNightMinutes(d.getNightWorkMinutes());
+            daily.setOvertimeMinutes(d.getOvertimeMinutes());
+            daily.setAppliedHourlyWage(d.getAppliedHourlyWage());
+            daily.setBasePay(d.getBasePay());
+            daily.setNightAllowance(d.getNightAllowance());
+            daily.setOvertimeAllowance(d.getOvertimeAllowance());
+            daily.setTransportAmount(d.getTransportAmount());
+
+            // 元勤怠データから打刻時刻情報を補完
+            AttendanceDto originalAtt = attendanceMapper.findById(d.getAttendanceId());
+            if (originalAtt != null) {
+                daily.setClockInAt(originalAtt.getClockInAt() != null ? originalAtt.getClockInAt().format(timeFormatter) : "-");
+                daily.setClockOutAt(originalAtt.getClockOutAt() != null ? originalAtt.getClockOutAt().format(timeFormatter) : "-");
+            } else {
+                daily.setClockInAt("-");
+                daily.setClockOutAt("-");
+            }
+
+            dailyList.add(daily);
+        }
+
+        response.setDailyAttendances(dailyList);
+        return response;
+    }
+
+    /**
+     * 給与台帳 Excel エクスポート
+     */
+    public byte[] exportPayrollToExcel(Long storeId, String targetYearMonth) throws IOException {
+        List<PayrollDto> payrolls = getPayrollsByStoreAndMonth(storeId, targetYearMonth);
+        return PayrollExcelExporter.exportToExcel(targetYearMonth, payrolls);
+    }
+}
+
+
+=== FILE: AttendanceService.java ===
+package com.example.kintai.domain.attendance.service;
+
+import com.example.kintai.domain.attendance.dto.*;
+import com.example.kintai.domain.attendance.mapper.AttendanceMapper;
+import com.example.kintai.domain.attendance.util.AttendanceTimeCalculator;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+
+@Service
+@Transactional(readOnly = true)
+public class AttendanceService {
+
+    private final AttendanceMapper attendanceMapper;
+
+    public AttendanceService(AttendanceMapper attendanceMapper) {
+        this.attendanceMapper = attendanceMapper;
+    }
+
+    /**
+     * リアルタイム打刻処理（出勤・休憩開始・休憩終了・退勤）
+     */
+    @Transactional
+    public AttendanceDto punch(AttendancePunchDto punchDto) {
+        Long storeStaffId = punchDto.getStoreStaffId();
+        String punchType = punchDto.getPunchType();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDate today = now.toLocalDate();
+
+        // 排他制御: 同時打刻の競合を防止する悲観的ロック
+        attendanceMapper.lockStoreStaffForUpdate(storeStaffId);
+
+        AttendanceDto active = attendanceMapper.findActiveAttendance(storeStaffId);
+
+        switch (punchType) {
+            case "CLOCK_IN":
+                return handleClockIn(punchDto, today, now, active);
+
+            case "BREAK_START":
+                return handleBreakStart(now, active);
+
+            case "BREAK_END":
+                return handleBreakEnd(now, active);
+
+            case "CLOCK_OUT":
+                return handleClockOut(now, active);
+
+            default:
+                throw new IllegalArgumentException("無効な打刻タイプです: " + punchType);
+        }
+    }
+
+    private AttendanceDto handleClockIn(AttendancePunchDto punchDto, LocalDate today, LocalDateTime now, AttendanceDto active) {
+        if (active != null) {
+            throw new IllegalStateException("既に出勤中の打刻が存在します。");
+        }
+
+        // 該当日の給与が既に確定済（CONFIRMED / PAID）の場合は新規打刻を遮断
+        if (attendanceMapper.isPayrollConfirmedForDate(punchDto.getStoreStaffId(), today)) {
+            throw new IllegalStateException("対象期間の給与は既に確定済みのため、新規打刻はできません。");
+        }
+
+        Long shiftId = attendanceMapper.findConfirmedShiftIdForDate(punchDto.getStoreStaffId(), today);
+
+        AttendanceDto attendance = new AttendanceDto();
+        attendance.setStoreId(punchDto.getStoreId());
+        attendance.setStoreStaffId(punchDto.getStoreStaffId());
+        attendance.setShiftId(shiftId);
+        attendance.setWorkDate(today);
+        attendance.setClockInAt(now);
+        attendance.setTotalBreakMinutes(0);
+        attendance.setNetWorkMinutes(0);
+        attendance.setNightWorkMinutes(0);
+        attendance.setOvertimeMinutes(0);
+        attendance.setClockInMethod("BUTTON");
+        attendance.setAttendanceStatus("WORKING");
+
+        attendanceMapper.insertAttendance(attendance);
+        return attendance;
+    }
+
+    private AttendanceDto handleBreakStart(LocalDateTime now, AttendanceDto active) {
+        if (active == null || !"WORKING".equals(active.getAttendanceStatus())) {
+            throw new IllegalStateException("勤務中のみ休憩開始が可能です。");
+        }
+
+        active.setBreakStartAt(now);
+        active.setAttendanceStatus("ON_BREAK");
+        attendanceMapper.updateAttendance(active);
+        return active;
+    }
+
+    private AttendanceDto handleBreakEnd(LocalDateTime now, AttendanceDto active) {
+        if (active == null || !"ON_BREAK".equals(active.getAttendanceStatus())) {
+            throw new IllegalStateException("休憩中のみ休憩終了が可能です。");
+        }
+
+        LocalDateTime breakStart = active.getBreakStartAt();
+        int breakDuration = Math.toIntExact(Duration.between(breakStart, now).toMinutes());
+
+        AttendanceBreakDto breakDto = new AttendanceBreakDto(breakStart, now, breakDuration);
+        breakDto.setAttendanceId(active.getAttendanceId());
+        attendanceMapper.insertBreak(breakDto);
+
+        active.setBreakStartAt(null);
+        active.setBreakEndAt(now);
+        active.setTotalBreakMinutes(active.getTotalBreakMinutes() + breakDuration);
+        active.setAttendanceStatus("WORKING");
+        attendanceMapper.updateAttendance(active);
+        return active;
+    }
+
+    private AttendanceDto handleClockOut(LocalDateTime now, AttendanceDto active) {
+        if (active == null || !"WORKING".equals(active.getAttendanceStatus())) {
+            throw new IllegalStateException("勤務中のみ退勤打刻が可能です。(休憩中の場合は先に休憩を終了してください)");
+        }
+
+        // 休憩区間一覧の取得
+        List<AttendanceBreakDto> breakEntities = attendanceMapper.findBreaksByAttendanceId(active.getAttendanceId());
+        List<AttendanceTimeCalculator.BreakInterval> breakIntervals = new ArrayList<>();
+        for (AttendanceBreakDto b : breakEntities) {
+            breakIntervals.add(new AttendanceTimeCalculator.BreakInterval(b.getBreakStartAt(), b.getBreakEndAt()));
+        }
+
+        // 時間計算機（分単位精密計算）呼び出し
+        AttendanceTimeCalculator.CalculationResult calc = AttendanceTimeCalculator.calculate(
+                active.getClockInAt(),
+                now,
+                breakIntervals
+        );
+
+        active.setClockOutAt(now);
+        active.setTotalBreakMinutes(calc.totalBreakMinutes());
+        active.setNetWorkMinutes(calc.netWorkMinutes());
+        active.setNightWorkMinutes(calc.nightWorkMinutes());
+        active.setOvertimeMinutes(calc.overtimeMinutes());
+        active.setAttendanceStatus("COMPLETED");
+
+        attendanceMapper.updateAttendance(active);
+        return active;
+    }
+
+    public AttendanceDto getActiveAttendance(Long storeStaffId) {
+        return attendanceMapper.findActiveAttendance(storeStaffId);
+    }
+
+    /**
+     * 勤怠修正申請の登録（スタッフ申請）
+     */
+    @Transactional
+    public Long requestModification(AttendanceModRequestDto requestDto) {
+        Long storeStaffId = requestDto.getStoreStaffId();
+        LocalDate workDate = requestDto.getWorkDate();
+
+        // 排他制御: 悲観的ロックの確保
+        attendanceMapper.lockStoreStaffForUpdate(storeStaffId);
+
+        // 該当勤務日の給与が確定済の場合は修正申請を遮断
+        if (attendanceMapper.isPayrollConfirmedForDate(storeStaffId, workDate)) {
+            throw new IllegalStateException("指定された勤務日 (" + workDate + ") は既に給与が確定されているため、修正申請できません。");
+        }
+
+        // 出勤日と勤務基準日の一致検証
+        if (!requestDto.getRequestedClockInAt().toLocalDate().equals(workDate)) {
+            throw new IllegalArgumentException("出勤時刻の日付は勤務基準日と一致している必要があります。");
+        }
+        if (requestDto.getRequestedClockOutAt().isBefore(requestDto.getRequestedClockInAt())) {
+            throw new IllegalArgumentException("退勤時刻は出勤時刻より後である必要があります。");
+        }
+
+        // 既存勤怠が存在する場合は元のスナップショットを取得
+        AttendanceDto original = null;
+        if (requestDto.getAttendanceId() != null) {
+            original = attendanceMapper.findById(requestDto.getAttendanceId());
+            if (original != null) {
+                requestDto.setBeforeClockInAt(original.getClockInAt());
+                requestDto.setBeforeClockOutAt(original.getClockOutAt());
+                requestDto.setBeforeBreakMinutes(original.getTotalBreakMinutes());
+                requestDto.setStoreId(original.getStoreId());
+            }
+        }
+
+        if (requestDto.getStoreId() == null) {
+            throw new IllegalArgumentException("店舗ID(storeId)は必須です。マルチテナント境界を侵害することはできません。");
+        }
+
+        // 申請合計休憩時間の計算
+        int totalBreakMin = (requestDto.getRequestedBreakMinutes() != null) ? requestDto.getRequestedBreakMinutes() : 0;
+        if (requestDto.getRequestedBreaks() != null && !requestDto.getRequestedBreaks().isEmpty()) {
+            int sumBreak = 0;
+            for (AttendanceModRequestDto.BreakTimeDto b : requestDto.getRequestedBreaks()) {
+                sumBreak += (int) Duration.between(b.getStartAt(), b.getEndAt()).toMinutes();
+            }
+            totalBreakMin = sumBreak;
+        }
+        requestDto.setRequestedBreakMinutes(totalBreakMin);
+
+        // 1. 修正申請レコード登録
+        attendanceMapper.insertModRequest(requestDto);
+        Long modRequestId = requestDto.getModRequestId();
+
+        // 2. 修正前休憩区間スナップショットの保存
+        if (original != null) {
+            List<AttendanceBreakDto> beforeBreaks = attendanceMapper.findBreaksByAttendanceId(original.getAttendanceId());
+            for (AttendanceBreakDto b : beforeBreaks) {
+                attendanceMapper.insertModBreak(modRequestId, "BEFORE", b.getBreakStartAt(), b.getBreakEndAt(), b.getDurationMinutes());
+            }
+        }
+
+        // 3. 修正希望休憩区間スナップショットの保存
+        if (requestDto.getRequestedBreaks() != null) {
+            for (AttendanceModRequestDto.BreakTimeDto b : requestDto.getRequestedBreaks()) {
+                int dur = (int) Duration.between(b.getStartAt(), b.getEndAt()).toMinutes();
+                attendanceMapper.insertModBreak(modRequestId, "REQUESTED", b.getStartAt(), b.getEndAt(), dur);
+            }
+        }
+
+        return modRequestId;
+    }
+
+    /**
+     * 店舗別勤怠修正申請一覧取得
+     */
+    public List<AttendanceModResponseDto> getModRequests(Long storeId, String status) {
+        return attendanceMapper.findModRequestsByStoreId(storeId, status);
+    }
+
+    /**
+     * 店長による勤怠修正申請の承認または却下処理
+     */
+    @Transactional
+    public void reviewModification(Long modRequestId, Long reviewerId, AttendanceModReviewDto reviewDto) {
+        AttendanceModResponseDto req = attendanceMapper.findModRequestById(modRequestId);
+        if (req == null) {
+            throw new IllegalArgumentException("存在しない修正申請です。(ID: " + modRequestId + ")");
+        }
+
+        if (!"PENDING".equals(req.getApprovalStatus())) {
+            throw new IllegalStateException("既に処理された申請です。(状態: " + req.getApprovalStatus() + ")");
+        }
+
+        // 排他制御: 悲観的ロックの確保
+        attendanceMapper.lockStoreStaffForUpdate(req.getStoreStaffId());
+
+        // 該当勤務日の給与が確定済の場合は承認不可
+        if (attendanceMapper.isPayrollConfirmedForDate(req.getStoreStaffId(), req.getWorkDate())) {
+            throw new IllegalStateException("指定された勤務日は既に給与が確定されているため、承認できません。");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if ("REJECT".equalsIgnoreCase(reviewDto.getAction())) {
+            attendanceMapper.updateModRequestReview(modRequestId, "REJECTED", reviewerId, reviewDto.getRejectReason(), now);
+            return;
+        }
+
+        // 承認（APPROVE）処理
+        List<AttendanceBreakDto> reqBreaks = attendanceMapper.findModBreaksByRequestId(modRequestId, "REQUESTED");
+        List<AttendanceTimeCalculator.BreakInterval> breakIntervals = new ArrayList<>();
+        int totalBreakMin = 0;
+
+        for (AttendanceBreakDto b : reqBreaks) {
+            breakIntervals.add(new AttendanceTimeCalculator.BreakInterval(b.getBreakStartAt(), b.getBreakEndAt()));
+            totalBreakMin += b.getDurationMinutes();
+        }
+
+        if (totalBreakMin == 0 && req.getRequestedBreakMinutes() != null && req.getRequestedBreakMinutes() > 0) {
+            totalBreakMin = req.getRequestedBreakMinutes();
+        }
+
+        // 分単位精密勤怠計算
+        AttendanceTimeCalculator.CalculationResult calc = AttendanceTimeCalculator.calculate(
+                req.getRequestedClockInAt(),
+                req.getRequestedClockOutAt(),
+                breakIntervals
+        );
+
+        if (req.getAttendanceId() != null) {
+            // 既存勤怠の更新
+            AttendanceDto att = attendanceMapper.findById(req.getAttendanceId());
+            if (att != null) {
+                att.setClockInAt(req.getRequestedClockInAt());
+                att.setClockOutAt(req.getRequestedClockOutAt());
+                att.setTotalBreakMinutes(Math.max(totalBreakMin, calc.totalBreakMinutes()));
+                att.setNetWorkMinutes(calc.netWorkMinutes());
+                att.setNightWorkMinutes(calc.nightWorkMinutes());
+                att.setOvertimeMinutes(calc.overtimeMinutes());
+                att.setAttendanceStatus("COMPLETED");
+                attendanceMapper.updateAttendance(att);
+
+                // 休憩テーブルの置換
+                attendanceMapper.deleteBreaksByAttendanceId(att.getAttendanceId());
+                for (AttendanceBreakDto b : reqBreaks) {
+                    b.setAttendanceId(att.getAttendanceId());
+                    attendanceMapper.insertBreak(b);
+                }
+            }
+        } else {
+            // 完全打刻漏れによる事後新規勤怠生成
+            AttendanceDto newAtt = new AttendanceDto();
+            newAtt.setStoreId(req.getStoreId());
+            newAtt.setStoreStaffId(req.getStoreStaffId());
+            newAtt.setWorkDate(req.getWorkDate());
+            newAtt.setClockInAt(req.getRequestedClockInAt());
+            newAtt.setClockOutAt(req.getRequestedClockOutAt());
+            newAtt.setTotalBreakMinutes(Math.max(totalBreakMin, calc.totalBreakMinutes()));
+            newAtt.setNetWorkMinutes(calc.netWorkMinutes());
+            newAtt.setNightWorkMinutes(calc.nightWorkMinutes());
+            newAtt.setOvertimeMinutes(calc.overtimeMinutes());
+            newAtt.setClockInMethod("WEB_MOD");
+            newAtt.setAttendanceStatus("COMPLETED");
+
+            Long shiftId = attendanceMapper.findConfirmedShiftIdForDate(req.getStoreStaffId(), req.getWorkDate());
+            newAtt.setShiftId(shiftId);
+
+            attendanceMapper.insertAttendance(newAtt);
+
+            for (AttendanceBreakDto b : reqBreaks) {
+                b.setAttendanceId(newAtt.getAttendanceId());
+                attendanceMapper.insertBreak(b);
+            }
+        }
+
+        attendanceMapper.updateModRequestReview(modRequestId, "APPROVED", reviewerId, null, now);
+    }
+
+    /**
+     * 未退勤・未処理勤怠の管理者強制締めAPI (ADV-001 / F-CLAUDE-003 デッドロック完全排除: store_staff 先行ロック保証)
+     */
+    @Transactional
+    public AttendanceDto forceCloseAttendance(Long attendanceId, Long reviewerId, String adminReason) {
+        // 1. ノンロッキングで staffId を事前取得
+        AttendanceDto preCheck = attendanceMapper.findById(attendanceId);
+        if (preCheck == null) {
+            throw new IllegalArgumentException("存在しない勤怠データです。(ID: " + attendanceId + ")");
+        }
+
+        // 2. 厳格な階層型ロック: store_staff を最優先ロック (punch処理との逆順デッドロックを防止)
+        attendanceMapper.lockStoreStaffForUpdate(preCheck.getStoreStaffId());
+
+        // 3. ロック獲得後に最新エンティティを再取得
+        AttendanceDto att = attendanceMapper.findById(attendanceId);
+        if (att == null) {
+            throw new IllegalArgumentException("存在しない勤怠データです。(ID: " + attendanceId + ")");
+        }
+
+        if ("COMPLETED".equals(att.getAttendanceStatus())) {
+            return att; // 既に完了済みの場合は冪等に返却
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        // 休憩中の未終了休憩をクローズ
+        if ("ON_BREAK".equals(att.getAttendanceStatus()) && att.getBreakStartAt() != null) {
+            int breakDuration = Math.max(0, Math.toIntExact(Duration.between(att.getBreakStartAt(), now).toMinutes()));
+            AttendanceBreakDto breakDto = new AttendanceBreakDto(att.getBreakStartAt(), now, breakDuration);
+            breakDto.setAttendanceId(att.getAttendanceId());
+            attendanceMapper.insertBreak(breakDto);
+            att.setBreakStartAt(null);
+            att.setBreakEndAt(now);
+            att.setTotalBreakMinutes(att.getTotalBreakMinutes() + breakDuration);
+        }
+
+        // 退勤打刻漏れの場合は現在時刻で強制クローズ
+        if (att.getClockOutAt() == null) {
+            att.setClockOutAt(now);
+        }
+
+        List<AttendanceBreakDto> breakEntities = attendanceMapper.findBreaksByAttendanceId(attendanceId);
+        List<AttendanceTimeCalculator.BreakInterval> breakIntervals = new ArrayList<>();
+        for (AttendanceBreakDto b : breakEntities) {
+            if (b.getBreakStartAt() != null && b.getBreakEndAt() != null && b.getBreakEndAt().isAfter(b.getBreakStartAt())) {
+                breakIntervals.add(new AttendanceTimeCalculator.BreakInterval(b.getBreakStartAt(), b.getBreakEndAt()));
+            }
+        }
+
+        AttendanceTimeCalculator.CalculationResult calc = AttendanceTimeCalculator.calculate(
+                att.getClockInAt(), att.getClockOutAt(), breakIntervals
+        );
+
+        att.setTotalBreakMinutes(calc.totalBreakMinutes());
+        att.setNetWorkMinutes(calc.netWorkMinutes());
+        att.setNightWorkMinutes(calc.nightWorkMinutes());
+        att.setOvertimeMinutes(calc.overtimeMinutes());
+        att.setAttendanceStatus("COMPLETED");
+
+        attendanceMapper.updateAttendance(att);
+        return att;
+    }
+}
+
+
+### TASK PROMPT:
+以下のSpring Boot 4 / MyBatisバックエンドサービスにおける排他制御（悲観的ロック SELECT ... FOR UPDATE）、トランザクション境界、および同時実行制御のアーキテクチャについて厳格に監査してください。
+
+【監査対象ファイル】
+1. src/main/java/com/example/kintai/domain/shift/service/ShiftService.java
+2. src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java
+3. src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java
+
+【主要監査ポイント】
+1. シフト申請（requestShift）およびシフト確定（confirmShift）における store_staff 単位の悲観的ロック直列化とデッドロック防止順序
+2. 給与計算（calculatePayrollForStaff）および確定・支払における二重上書き防止ガード（DRAFT状態検証および更新行数チェック）
+3. 未退勤ゴースト打刻に対する強制締めAPI（forceCloseAttendance）の階層型ロック保証
+4. MyBatisクエリとの整合性およびトランザクション（@Transactional）境界の堅牢性
+
+【出力形式】
+Markdownの指摘事項一覧表（| Finding ID | Severity | Item | Flaw Analysis | Concrete Code/Rule Fix |）を出力し、
+最終行に必ず 'VERDICT: PASS' または 'VERDICT: FAIL' を出力してください。
+
+codex
+指定の3サービスについて、ロック取得順、状態を判定する時点、更新件数の扱いを監査します。先にMapper SQLとトランザクション設定の所在を確認し、コードから確定できる欠陥と設定に依存するリスクを区別します。
+2026-11-26T07:05:12.397212Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`\\\"C:\\\\\\\\WINDOWS\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell.exe\\\" -Command \\\"rg --files --hidden -g '\\\"'!**/.git/**'\\\"' | Select-Object -First 100\\\"` rejected: blocked by policy\")" }
+codex
+**監査結果は FAIL です。** 最も重大な指摘は `AttendanceService.reviewModification` です。`PENDING` の判定が職員ロックの取得前にあり、同じ申請を待機していた後続トランザクションも承認処理に進めます。特に打刻漏れ申請では、承認状態の更新より先に新しい勤怠を登録するため、状態更新だけを条件付きにしても、その失敗でトランザクション全体をロールバックしなければ重複登録を防げません。
+
+提示された3ファイルを静的に監査しました。ローカルのファイル一覧取得は実行ポリシーにより拒否されたため、Mapper SQL、DDL、DB分離レベル、MyBatisキャッシュ設定および実DBでの競合結果は未確認です。以下では設定やSQLに依存する指摘に、その成立条件を明記します。
+
+| Finding ID | Severity | Item | Flaw Analysis | Concrete Code/Rule Fix |
+|---|---|---|---|---|
+| ATT-01 | High | `reviewModification` の二重承認 | 2件の処理がともにロック前に `PENDING` を読めます。後続処理は職員ロック取得後に申請を再検証せず、勤怠登録・更新または却下に進みます。最終状態更新の件数も検証していません。 | 事前取得を職員IDに限定し、`store_staff` → 修正申請行の順でロックします。申請行の最新状態が `PENDING` の場合のみ処理し、最終更新にも `WHERE approval_status = 'PENDING'` を付け、更新件数が1以外なら例外で全体をロールバックしてください。 |
+| ATT-02 | High | `requestModification` がロックする職員と更新対象の不一致 | 要求DTOの職員・勤務日でロックと給与確定チェックを行いますが、`attendanceId` で取得した元勤怠との職員・勤務日の一致を検証していません。不一致の申請が届くと、承認時にも申請側の職員をロックしたまま別の勤怠を更新し得ます。 | 既存勤怠の修正では、認可済み店舗・職員で対象を限定し、職員ロック取得後に対象勤怠をロックして所属と勤務日を照合してください。給与確定チェックには照合済みの値を使い、対象消失時も例外にしてください。 |
+| ATT-03 | High（設定依存） | `forceCloseAttendance` の再読込 | 事前の `findById` が非ロック読取なら、職員を先にロックする順序は妥当です。ただし取得後も同じ `findById` を呼んでいます。MyBatisのセッションキャッシュやDBの反復可能読取によって古い `ON_BREAK` を再利用すると、待機中に完了した休憩を再登録し得ます。 | 事前照会は職員IDだけにし、職員ロック後は専用の `findByIdForUpdate` で勤怠行を現在読取してください。その結果が `COMPLETED` なら即時返却します。強制締めと通常の休憩終了を別トランザクションで競合させ、休憩行数と終了時刻を検証してください。 |
+| SHF-01 | High（SQL・分離レベル依存） | `requestShift` と `confirmShift` の重複検査 | `requestShift` は職員ロック後に重複検査と登録を行います。一方、`confirmShift` は先に `findById` を実行します。これがスナップショットを確立し、`existsOverlapShift` も同じスナップショットを読む構成では、ロック待機中に別シフトへ確定された時間帯を見落とせます。 | 両経路で同じ職員行の取得成功を必須にし、確定時は職員 → 対象シフトの順でロックしてください。重複判定が直前のコミットを読めるSQL・分離レベルを選び、前日開始の夜勤も含めて `既存開始 < 新終了 AND 既存終了 > 新開始` を検証してください。 |
+| PAY-01 | High（SQL・分離レベル依存） | `confirmPayroll` の確定時再計算 | 再計算内の `findByStaffAndMonthForUpdate` は、実際にロック読取なら二重確定を防ぐ有効なガードです。一方、先頭の `findById` が作ったスナップショットを後続の通常読取が使う構成では、待機中にコミットされた勤怠・未処理申請を見落としたまま金額を確定し得ます。 | 職員ロック後に給与行をロックし、対象ID・期間・`DRAFT` をその行で検証してください。確定用の勤怠・未処理件数も同じ職員ロックの下で最新コミットを読むよう統一し、待機中に勤怠修正がコミットされるケースを検証してください。 |
+| PAY-02 | Medium | 給与の確定・支払更新件数 | `confirmPayroll` は `updatePayrollStatusConfirm` の更新件数を検証していません。0件でも再計算した明細をコミットして正常終了し得ます。`payPayroll` は0件を検出しますが、`CONFIRMED` 判定に使うDTOはロック取得前のものです。支払の二重更新防止は未確認のSQL条件に依存します。 | 確定は `id = ? AND status = 'DRAFT'`、支払は `id = ? AND status = 'CONFIRMED'` を更新条件にし、どちらも更新件数が厳密に1であることを確認してください。ロック前の状態を支払可否の最終根拠にしないでください。 |
+| PAY-03 | Medium（取得順依存） | `calculateMonthlyPayroll` の複数職員ロック | 一括計算全体が1トランザクションです。同一クラス内の `calculatePayrollForStaff` 呼出しは外側のトランザクションで動作し、先に取得した職員ロックも月次処理終了まで保持します。並行バッチの職員取得順が異なると循環待ちが成立します。 | 一括ロールバックを維持する場合は、全バッチで職員IDを一意な昇順に固定してからロックしてください。個別計算と一括計算の両方で `store_staff` → 給与行の順序を統一してください。 |
+| DB-01 | 要検証 | Mapper SQL・DDL・トランザクション境界 | 提示された書込用公開メソッドには `@Transactional` があります。ただし、メソッド名だけでは `FOR UPDATE` の実行、対象職員行の存在、給与Upsertの一意キー、全Mapperの同一トランザクション参加を確認できません。職員行の取得結果もサービス側では検査していません。 | 実MapperとDDLで職員主キーによる1行ロック、給与の `(store_staff_id, target_year_month)` 一意制約、状態付き更新を照合してください。実運用と同じDB・分離レベルの独立した2接続で、待機後に先行コミットが見えることと、条件付き更新失敗時に明細までロールバックされることを確認してください。 |
+
+VERDICT: FAIL
+tokens used
+18,779

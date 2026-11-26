@@ -186,7 +186,7 @@ public class AttendanceService {
         }
 
         if (requestDto.getStoreId() == null) {
-            requestDto.setStoreId(1L); // デフォルト店舗補正
+            throw new IllegalArgumentException("店舗ID(storeId)は必須です。マルチテナント境界を侵害することはできません。");
         }
 
         // 申請合計休憩時間の計算
@@ -327,5 +327,68 @@ public class AttendanceService {
         }
 
         attendanceMapper.updateModRequestReview(modRequestId, "APPROVED", reviewerId, null, now);
+    }
+
+    /**
+     * 未退勤・未処理勤怠の管理者強制締めAPI (ADV-001 / F-CLAUDE-003 デッドロック完全排除: store_staff 先行ロック保証)
+     */
+    @Transactional
+    public AttendanceDto forceCloseAttendance(Long attendanceId, Long reviewerId, String adminReason) {
+        // 1. ノンロッキングで staffId を事前取得
+        AttendanceDto preCheck = attendanceMapper.findById(attendanceId);
+        if (preCheck == null) {
+            throw new IllegalArgumentException("存在しない勤怠データです。(ID: " + attendanceId + ")");
+        }
+
+        // 2. 厳格な階層型ロック: store_staff を最優先ロック (punch処理との逆順デッドロックを防止)
+        attendanceMapper.lockStoreStaffForUpdate(preCheck.getStoreStaffId());
+
+        // 3. ロック獲得後に最新エンティティを再取得
+        AttendanceDto att = attendanceMapper.findById(attendanceId);
+        if (att == null) {
+            throw new IllegalArgumentException("存在しない勤怠データです。(ID: " + attendanceId + ")");
+        }
+
+        if ("COMPLETED".equals(att.getAttendanceStatus())) {
+            return att; // 既に完了済みの場合は冪等に返却
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        // 休憩中の未終了休憩をクローズ
+        if ("ON_BREAK".equals(att.getAttendanceStatus()) && att.getBreakStartAt() != null) {
+            int breakDuration = Math.max(0, Math.toIntExact(Duration.between(att.getBreakStartAt(), now).toMinutes()));
+            AttendanceBreakDto breakDto = new AttendanceBreakDto(att.getBreakStartAt(), now, breakDuration);
+            breakDto.setAttendanceId(att.getAttendanceId());
+            attendanceMapper.insertBreak(breakDto);
+            att.setBreakStartAt(null);
+            att.setBreakEndAt(now);
+            att.setTotalBreakMinutes(att.getTotalBreakMinutes() + breakDuration);
+        }
+
+        // 退勤打刻漏れの場合は現在時刻で強制クローズ
+        if (att.getClockOutAt() == null) {
+            att.setClockOutAt(now);
+        }
+
+        List<AttendanceBreakDto> breakEntities = attendanceMapper.findBreaksByAttendanceId(attendanceId);
+        List<AttendanceTimeCalculator.BreakInterval> breakIntervals = new ArrayList<>();
+        for (AttendanceBreakDto b : breakEntities) {
+            if (b.getBreakStartAt() != null && b.getBreakEndAt() != null && b.getBreakEndAt().isAfter(b.getBreakStartAt())) {
+                breakIntervals.add(new AttendanceTimeCalculator.BreakInterval(b.getBreakStartAt(), b.getBreakEndAt()));
+            }
+        }
+
+        AttendanceTimeCalculator.CalculationResult calc = AttendanceTimeCalculator.calculate(
+                att.getClockInAt(), att.getClockOutAt(), breakIntervals
+        );
+
+        att.setTotalBreakMinutes(calc.totalBreakMinutes());
+        att.setNetWorkMinutes(calc.netWorkMinutes());
+        att.setNightWorkMinutes(calc.nightWorkMinutes());
+        att.setOvertimeMinutes(calc.overtimeMinutes());
+        att.setAttendanceStatus("COMPLETED");
+
+        attendanceMapper.updateAttendance(att);
+        return att;
     }
 }

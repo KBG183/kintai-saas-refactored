@@ -1,0 +1,10 @@
+﻿{
+    "schema":  "audit-manifest/v1",
+    "run_id":  "20261126_160503_27372_codex",
+    "auditor":  "codex",
+    "model":  "gpt-6.2-astra",
+    "verdict":  "FAIL",
+    "findings_count":  0,
+    "created_utc":  "2026-11-26T07:06:07.6193916Z",
+    "report_sha256":  "7B28A258EAADCFA1C92A67CB80F472C3D60AD2363FC271310209A1F2C4D36C98"
+}

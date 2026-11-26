@@ -1,0 +1,14 @@
+{
+    "schema":  "audit-verdict/v1",
+    "auditor":  "claude",
+    "run_id":  "20261126_160140_claude",
+    "tree_hash":  "WORKING_TREE",
+    "response_sha256":  "f6bef785e1affd7f44ab6da6985fff06b158f8a22acac43a8a5789000339ef8e",
+    "verdict":  "FAIL",
+    "findings_count":  0,
+    "p0_p1_count":  0,
+    "findings":  [
+
+                 ],
+    "created_utc":  "2026-11-26T07:02:21.0805074Z"
+}

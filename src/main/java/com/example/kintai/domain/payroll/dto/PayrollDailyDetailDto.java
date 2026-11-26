@@ -12,6 +12,7 @@ public class PayrollDailyDetailDto {
     private Integer netWorkMinutes;
     private Integer nightWorkMinutes;
     private Integer overtimeMinutes;
+    private Integer nightOvertimeMinutes;
     private Integer basePay;
     private Integer nightAllowance;
     private Integer overtimeAllowance;
@@ -45,6 +46,9 @@ public class PayrollDailyDetailDto {
 
     public Integer getOvertimeMinutes() { return overtimeMinutes; }
     public void setOvertimeMinutes(Integer overtimeMinutes) { this.overtimeMinutes = overtimeMinutes; }
+
+    public Integer getNightOvertimeMinutes() { return nightOvertimeMinutes; }
+    public void setNightOvertimeMinutes(Integer nightOvertimeMinutes) { this.nightOvertimeMinutes = nightOvertimeMinutes; }
 
     public Integer getBasePay() { return basePay; }
     public void setBasePay(Integer basePay) { this.basePay = basePay; }

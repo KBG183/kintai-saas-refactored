@@ -84,6 +84,9 @@ public class ShiftService {
             throw new IllegalArgumentException("存在しないシフトです。(ID: " + shiftId + ")");
         }
 
+        // 排他制御: シフト確定の競合を防止する悲観的ロック (store_staff 単位直列化)
+        shiftMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
+
         LocalDate workDate = existing.getWorkDate();
         LocalDateTime confirmedStartAt = LocalDateTime.of(workDate, LocalTime.parse(confirmDto.getConfirmedStartTime()));
         LocalDateTime confirmedEndAt = TimeUtils.resolveEndDateTime(workDate, confirmDto.getConfirmedStartTime(), confirmDto.getConfirmedEndTime());
@@ -106,7 +109,7 @@ public class ShiftService {
         existing.setConfirmedStartAt(confirmedStartAt);
         existing.setConfirmedEndAt(confirmedEndAt);
         existing.setPlannedBreakMinutes(plannedBreak);
-        existing.setStatus(confirmDto.getStatus() != null ? confirmDto.getStatus() : "CONFIRMED");
+        existing.setStatus("CONFIRMED");
         existing.setOwnerMemo(confirmDto.getOwnerMemo());
 
         shiftMapper.updateShiftConfirm(existing);

@@ -19,6 +19,11 @@ public interface PayrollMapper {
 
     PayrollDto findById(@Param("payrollId") Long payrollId);
 
+    PayrollDto findByStaffAndMonthForUpdate(
+            @Param("storeStaffId") Long storeStaffId,
+            @Param("targetYearMonth") String targetYearMonth
+    );
+
     int upsertPayroll(PayrollDto payroll);
 
     int insertPayrollDailyDetail(PayrollDailyDetailDto detail);
@@ -30,6 +35,11 @@ public interface PayrollMapper {
     int updatePayrollStatusConfirm(
             @Param("payrollId") Long payrollId,
             @Param("confirmedAt") LocalDateTime confirmedAt
+    );
+
+    int updatePayrollStatusPaid(
+            @Param("payrollId") Long payrollId,
+            @Param("paidAt") LocalDateTime paidAt
     );
 
     int countUnresolvedAttendance(

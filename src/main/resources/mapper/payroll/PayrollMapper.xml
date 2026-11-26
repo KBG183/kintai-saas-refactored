@@ -64,6 +64,34 @@
         WHERE p.payroll_id = #{payrollId}
     </select>
 
+    <select id="findByStaffAndMonthForUpdate" resultType="com.example.kintai.domain.payroll.dto.PayrollDto">
+        SELECT
+            p.payroll_id,
+            p.store_id,
+            p.store_staff_id,
+            p.target_year_month,
+            p.range_start_date,
+            p.range_end_date,
+            p.work_days_count,
+            p.total_work_minutes,
+            p.total_night_minutes,
+            p.total_overtime_minutes,
+            p.applied_hourly_wage,
+            p.applied_transport_limit,
+            p.base_pay,
+            p.night_allowance,
+            p.overtime_allowance,
+            p.transport_allowance,
+            p.gross_pay,
+            p.payroll_status,
+            p.confirmed_at,
+            p.paid_at
+        FROM payroll p
+        WHERE p.store_staff_id = #{storeStaffId}
+          AND p.target_year_month = #{targetYearMonth}
+        FOR UPDATE
+    </select>
+
     <insert id="upsertPayroll" useGeneratedKeys="true" keyProperty="payrollId">
         INSERT INTO payroll (
             store_id,
@@ -103,18 +131,18 @@
             #{payrollStatus}
         )
         ON DUPLICATE KEY UPDATE
-            work_days_count = VALUES(work_days_count),
-            total_work_minutes = VALUES(total_work_minutes),
-            total_night_minutes = VALUES(total_night_minutes),
-            total_overtime_minutes = VALUES(total_overtime_minutes),
-            applied_hourly_wage = VALUES(applied_hourly_wage),
-            applied_transport_limit = VALUES(applied_transport_limit),
-            base_pay = VALUES(base_pay),
-            night_allowance = VALUES(night_allowance),
-            overtime_allowance = VALUES(overtime_allowance),
-            transport_allowance = VALUES(transport_allowance),
-            gross_pay = VALUES(gross_pay),
-            updated_at = CURRENT_TIMESTAMP
+            work_days_count = IF(payroll.payroll_status = 'DRAFT', VALUES(work_days_count), payroll.work_days_count),
+            total_work_minutes = IF(payroll.payroll_status = 'DRAFT', VALUES(total_work_minutes), payroll.total_work_minutes),
+            total_night_minutes = IF(payroll.payroll_status = 'DRAFT', VALUES(total_night_minutes), payroll.total_night_minutes),
+            total_overtime_minutes = IF(payroll.payroll_status = 'DRAFT', VALUES(total_overtime_minutes), payroll.total_overtime_minutes),
+            applied_hourly_wage = IF(payroll.payroll_status = 'DRAFT', VALUES(applied_hourly_wage), payroll.applied_hourly_wage),
+            applied_transport_limit = IF(payroll.payroll_status = 'DRAFT', VALUES(applied_transport_limit), payroll.applied_transport_limit),
+            base_pay = IF(payroll.payroll_status = 'DRAFT', VALUES(base_pay), payroll.base_pay),
+            night_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(night_allowance), payroll.night_allowance),
+            overtime_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(overtime_allowance), payroll.overtime_allowance),
+            transport_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(transport_allowance), payroll.transport_allowance),
+            gross_pay = IF(payroll.payroll_status = 'DRAFT', VALUES(gross_pay), payroll.gross_pay),
+            updated_at = IF(payroll.payroll_status = 'DRAFT', CURRENT_TIMESTAMP, payroll.updated_at)
     </insert>
 
     <insert id="insertPayrollDailyDetail" useGeneratedKeys="true" keyProperty="payrollDailyDetailId">
@@ -127,6 +155,7 @@
             net_work_minutes,
             night_work_minutes,
             overtime_minutes,
+            night_overtime_minutes,
             base_pay,
             night_allowance,
             overtime_allowance,
@@ -140,6 +169,7 @@
             #{netWorkMinutes},
             #{nightWorkMinutes},
             #{overtimeMinutes},
+            #{nightOvertimeMinutes},
             #{basePay},
             #{nightAllowance},
             #{overtimeAllowance},
@@ -158,6 +188,7 @@
             net_work_minutes,
             night_work_minutes,
             overtime_minutes,
+            night_overtime_minutes,
             base_pay,
             night_allowance,
             overtime_allowance,
@@ -168,8 +199,10 @@
     </select>
 
     <delete id="deleteDailyDetailsByPayrollId">
-        DELETE FROM payroll_daily_detail
-        WHERE payroll_id = #{payrollId}
+        DELETE d FROM payroll_daily_detail d
+        JOIN payroll p ON d.payroll_id = p.payroll_id
+        WHERE d.payroll_id = #{payrollId}
+          AND p.payroll_status = 'DRAFT'
     </delete>
 
     <update id="updatePayrollStatusConfirm">
@@ -179,6 +212,15 @@
             updated_at = CURRENT_TIMESTAMP
         WHERE payroll_id = #{payrollId}
           AND payroll_status = 'DRAFT'
+    </update>
+
+    <update id="updatePayrollStatusPaid">
+        UPDATE payroll
+        SET payroll_status = 'PAID',
+            paid_at = #{paidAt},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE payroll_id = #{payrollId}
+          AND payroll_status = 'CONFIRMED'
     </update>
 
     <select id="countUnresolvedAttendance" resultType="int">

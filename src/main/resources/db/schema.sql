@@ -224,6 +224,7 @@ CREATE TABLE IF NOT EXISTS payroll_daily_detail (
     net_work_minutes INT NOT NULL DEFAULT 0,
     night_work_minutes INT NOT NULL DEFAULT 0,
     overtime_minutes INT NOT NULL DEFAULT 0,
+    night_overtime_minutes INT NOT NULL DEFAULT 0 COMMENT '深夜時間外割増労働時間 (分)',
     base_pay INT NOT NULL DEFAULT 0,
     night_allowance INT NOT NULL DEFAULT 0,
     overtime_allowance INT NOT NULL DEFAULT 0,
@@ -232,4 +233,22 @@ CREATE TABLE IF NOT EXISTS payroll_daily_detail (
     CONSTRAINT fk_payroll_detail_attendance FOREIGN KEY (attendance_id) REFERENCES attendance (attendance_id),
     CONSTRAINT uq_payroll_detail_attendance UNIQUE (payroll_id, attendance_id),
     INDEX idx_payroll_detail_date (payroll_id, work_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7-B. 翌月給与調整伝票 (給与確定後の遡及修正・控除・差額精算を管理)
+CREATE TABLE IF NOT EXISTS payroll_adjustment (
+    payroll_adjustment_id BIGINT AUTO_INCREMENT PRIMARY KEY COMMENT '給与調整伝票ID (PK)',
+    store_staff_id BIGINT NOT NULL COMMENT '店舗スタッフID (FK)',
+    target_year_month VARCHAR(7) NOT NULL COMMENT '調整発生対象年月 (例: 2026-10)',
+    adjustment_type VARCHAR(30) NOT NULL COMMENT '調整種別 (RETROACTIVE_WAGE, ATTENDANCE_CORRECTION, TRANSPORT_ADJUSTMENT, DEDUCTION)',
+    amount INT NOT NULL COMMENT '調整金額 (正数=支給加算, 負数=控除)',
+    reason VARCHAR(255) NOT NULL COMMENT '調整事由・根拠',
+    applied_payroll_id BIGINT NULL COMMENT '実際に反映・相殺された給与精算ID (FK)',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '状態 (PENDING, APPLIED, CANCELLED)',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_payroll_adj_staff FOREIGN KEY (store_staff_id) REFERENCES store_staff (store_staff_id),
+    CONSTRAINT fk_payroll_adj_payroll FOREIGN KEY (applied_payroll_id) REFERENCES payroll (payroll_id),
+    CONSTRAINT chk_payroll_adj_status CHECK (status IN ('PENDING', 'APPLIED', 'CANCELLED')),
+    INDEX idx_payroll_adj_staff_status (store_staff_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

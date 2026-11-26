@@ -36,5 +36,8 @@ out/
 ### VS Code ###
 .vscode/
 
-docs/
+# Local scratch & Korean reference isolation
+scratch/
+*_KO*
+docs/audit_runs/
 
