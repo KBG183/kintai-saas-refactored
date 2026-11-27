@@ -1,0 +1,24 @@
+﻿{
+    "timestamp":  "20261127_141858",
+    "domain":  "ALL",
+    "bundled_files":  [
+                          "src/main/java/com/example/kintai/config/SecurityConfig.java",
+                          "src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java",
+                          "src/main/java/com/example/kintai/global/security/CustomAccessDeniedHandler.java",
+                          "src/main/java/com/example/kintai/global/security/CustomAuthenticationEntryPoint.java",
+                          "src/test/java/com/example/kintai/global/security/SecurityHandlerTest.java"
+                      ],
+    "stages":  {
+                   "Stage 1: Deterministic Check":  "PASS (10.25s)",
+                   "Stage 3: Claude":  "SKIPPED",
+                   "Stage 3: Codex":  "SKIPPED",
+                   "Stage 2: Local Qwen Funnel":  "WARN_OVERRIDDEN (24.44s)",
+                   "Stage 4: Proof-First Verifier":  "PASS (0 citations verified)",
+                   "Stage 5: Final Gate":  "PASS"
+               },
+    "fail_closed_reasons":  [
+
+                            ],
+    "human_override_reason":  "Parallel validation test",
+    "receipt":  "audit/runs/20261127_141858_kintai_master_a4b90c98"
+}

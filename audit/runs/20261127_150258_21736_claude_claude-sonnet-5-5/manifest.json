@@ -1,0 +1,10 @@
+﻿{
+    "schema":  "audit-manifest/v1",
+    "run_id":  "20261127_150258_21736_claude",
+    "auditor":  "claude",
+    "model":  "claude-sonnet-5-5",
+    "verdict":  "FAIL",
+    "findings_count":  0,
+    "created_utc":  "2026-11-27T06:03:33.2503601Z",
+    "report_sha256":  "6A76E4D3084392EC16576E9B89C1DDC45572A87F5BA21F99DF985B7B0B9A8301"
+}

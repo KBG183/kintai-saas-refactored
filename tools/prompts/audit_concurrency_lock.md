@@ -24,7 +24,7 @@
 
 ## 2. 出力フォーマット（厳格遵守）
 
-以下のMarkdown表形式のみで出力してください。挨拶文や前置き・後書きは一切不要です。
+以下のMarkdown表形式に続けて、機械検証用の構造化Finding JSONブロックを必ず出力してください。挨拶文や前置き・後書きは一切不要です。
 
 | Finding ID | Audit Item | Severity (P0/P1/P2/Info) | Verdict (PASS / WARN / FAIL / N/A) | Code Line & Evidence | Detailed Analysis & Remediation |
 |---|---|---|---|---|---|
@@ -33,3 +33,19 @@
 | CON-03 | TOCTOU競合防止（状態判定前ロック） | P0 | PASS/FAIL | `ShiftService.java:L55` | ... |
 | CON-04 | 複数行ロック獲得順序の一貫性 | P1 | PASS/FAIL | `ShiftService.java:L70` | ... |
 | CON-05 | トランザクション内外部I/O混入排除 | P2 | PASS/FAIL | `ShiftService.java:L85` | ... |
+
+```json
+[
+  {
+    "finding_id": "CON-01",
+    "file_line": "RelativePath.java:L123",
+    "assertion": "具体的な主張・欠陥内容",
+    "failure_scenario": {
+      "input": "具体的な並行実行スレッド・入力条件",
+      "wrong_result": "発生するレースコンディション・二重確定・デッドロック"
+    },
+    "severity": "P0",
+    "verdict": "FAIL"
+  }
+]
+```

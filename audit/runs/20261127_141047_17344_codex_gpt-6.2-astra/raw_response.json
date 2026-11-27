@@ -1,0 +1,56 @@
+﻿감사 증거를 확보하지 못해 **감사 게이트를 FAIL**로 판정합니다. 대화에는 운영 규정만 있고, 작업 디렉터리에서 소스 파일을 열거하려던 명령은 모두 `blocked by policy`로 거부되었습니다. 이 판정은 코드 결함을 확인했다는 의미가 아닙니다.
+
+다음 세 항목은 모두 미검증입니다.
+
+| 감사 항목 | 판정에 필요한 근거 |
+|---|---|
+| 비관적 잠금 | 경합하는 쓰기 경로가 같은 행을 `SELECT ... FOR UPDATE`로 잠그는지와 여러 행의 잠금 획득 순서가 일관적인지 |
+| 트랜잭션 및 이중 확정 | 잠금 획득부터 상태 확인과 갱신까지 하나의 트랜잭션에 포함되는지와 두 번째 확정이 기존 값을 덮어쓸 수 있는지 |
+| 점포 격리 | 각 경로에서 인증된 사용자의 점포 권한을 확인하고, 다른 점포의 레코드에 대한 조회·변경을 차단하는지 |
+
+관련 서비스, MyBatis 매퍼 XML 또는 애너테이션 SQL, 인증된 `storeId`를 서비스에 전달하는 호출부를 첨부해 주시면 `[RelativeFilePath:LineNumber]` 근거로 판정할 수 있습니다.
+
+VERDICT: FAIL
+
+OpenAI Codex v0.167.0-alpha.4.1
+--------
+workdir: C:\Users\klad3\OneDrive\바탕 화면\IT\프로젝트\kintai-refactored\scratch\runs\unified_20261127_141047_17344_codex
+model: gpt-6.2-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 01a21b69-cb6d-7752-81b9-291747943763
+--------
+user
+### CONTEXT SPECIFICATION:
+
+
+### TASK PROMPT:
+Audit the attached KINTAI Spring Boot 4 / MyBatis services strictly for:
+1. Pessimistic locking (SELECT ... FOR UPDATE) serialization and deadlock prevention order.
+2. Transaction boundaries (@Transactional) and double-confirm overwrite guards.
+3. Tenant isolation (storeId / IDOR checks).
+Cite evidence using [RelativeFilePath:LineNumber] and end with 'VERDICT: PASS' or 'VERDICT: FAIL'.
+codex
+잠금, 트랜잭션, 점포 격리를 서비스와 매퍼에서 대조하고, 판정 근거를 파일과 줄 번호로 제시하겠습니다.
+2026-11-27T05:10:53.556937Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`\\\"C:\\\\\\\\WINDOWS\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell.exe\\\" -Command 'rg --files --hidden | Select-Object -First 100'` rejected: blocked by policy\")" }
+2026-11-27T05:10:56.917141Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`\\\"C:\\\\\\\\WINDOWS\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell.exe\\\" -NoProfile -Command 'rg --files'` rejected: blocked by policy\")" }
+2026-11-27T05:11:02.311905Z ERROR codex_core::tools::router: error=exec_command failed: CreateProcess { message: "Rejected(\"`\\\"C:\\\\\\\\WINDOWS\\\\\\\\System32\\\\\\\\WindowsPowerShell\\\\\\\\v1.0\\\\\\\\powershell.exe\\\" -Command 'Get-ChildItem -Name'` rejected: blocked by policy\")" }
+codex
+감사 증거를 확보하지 못해 **감사 게이트를 FAIL**로 판정합니다. 대화에는 운영 규정만 있고, 작업 디렉터리에서 소스 파일을 열거하려던 명령은 모두 `blocked by policy`로 거부되었습니다. 이 판정은 코드 결함을 확인했다는 의미가 아닙니다.
+
+다음 세 항목은 모두 미검증입니다.
+
+| 감사 항목 | 판정에 필요한 근거 |
+|---|---|
+| 비관적 잠금 | 경합하는 쓰기 경로가 같은 행을 `SELECT ... FOR UPDATE`로 잠그는지와 여러 행의 잠금 획득 순서가 일관적인지 |
+| 트랜잭션 및 이중 확정 | 잠금 획득부터 상태 확인과 갱신까지 하나의 트랜잭션에 포함되는지와 두 번째 확정이 기존 값을 덮어쓸 수 있는지 |
+| 점포 격리 | 각 경로에서 인증된 사용자의 점포 권한을 확인하고, 다른 점포의 레코드에 대한 조회·변경을 차단하는지 |
+
+관련 서비스, MyBatis 매퍼 XML 또는 애너테이션 SQL, 인증된 `storeId`를 서비스에 전달하는 호출부를 첨부해 주시면 `[RelativeFilePath:LineNumber]` 근거로 판정할 수 있습니다.
+
+VERDICT: FAIL
+tokens used
+8,547

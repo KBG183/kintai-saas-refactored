@@ -1,4 +1,4 @@
-# KINTAI SaaS Refactored 技術監査実証書 (Technical Audit Dossier)
+﻿# KINTAI SaaS Refactored 技術監査実証書 (Technical Audit Dossier)
 
 **文書バージョン**: v1.2 (Day 1〜2 統合ベースラインおよび重大欠陥是正完了)  
 **最終更新日**: 2026-11-27  
@@ -168,15 +168,26 @@ Phase 3 初期形（`fc5120d`）において検出された全重大欠陥の是
 
 | 欠陥分類 | 検出日 / 契機 | 対象ファイル / 箇所 | 是正前の問題点 | 是正内容および物理的証拠 | 是正完了日 | 検証結果 |
 |---|:---:|---|---|---|:---:|:---:|
-| **Critical** | 2026-11-26<br>(Phase 2 監査) | `PayrollService.java:105` | 4引数メソッドのみ呼出、休日割増35%/60%がデッドコード化 | DB DDL追加、6引数 `calculateDailyPay` 完全結合、休日手当の独立集計 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **High** | 2026-11-27<br>(外部ゲート) | `AttendanceTimeCalculator.java` / `PayrollService.java` | 出勤行単位の `net - 480` により分割勤務で時間外0分 | 日次グルーピングおよび出勤時刻順ソート、日累計480分超過分の再配分 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **High** | 2026-11-27<br>(外部ゲート) | `PayrollService.java:148-161` | 月中時給変更時、月60時間超25%追加加算が全スキップ | 日付順クロノロジカル累積および発生日契約時給基準の25%追加加算 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **High** | 2026-11-26<br>(Phase 2 監査) | `PayrollApiController`, `AttendanceApiController` | セッション未検証、店舗ID `1L` ハードコードフォールバック | `@AuthenticationPrincipal` 必須化、店舗所有権・本人データ検証ガード実装 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **High** | 2026-11-26<br>(Phase 2 監査) | `SecurityConfig.java:32-33` | `/api/**` に対する CSRF 保護の全機能停止 | `CookieCsrfTokenRepository` 適用および Fetch API ヘッダー連携 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **High** | 2026-11-27<br>(外部ゲート) | `audit/runs/` | `.gitignore` 除外により5層検証の物理的証拠が消失 | `.gitignore` ルール撤廃、マスター検証パイプライン実行および領収書永続化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **Medium** | 2026-11-27<br>(Qwen 27B 監査) | `PayrollService.java:201-260` | 非ロック状態での確定・支払判定によるレースコンディション | `findByIdForUpdate` 先行行ロック獲得後の状態判定フローへ再構築 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **Medium** | 2026-11-27<br>(外部ゲート) | `application.yaml:8-9` | `root/1234` DBパスワードの平文露出 | `${DB_USER:root}`, `${DB_PASSWORD:1234}` 環境変数化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **Medium** | 2026-11-27<br>(静的照合) | `README.md` / `sprint_roadmap_plan.md` | ER図テーブル名相違、ポート相違、マイルストーン表記衝突 | 実装DDLおよび設定値への完全同期、ロードマップ進捗の整合化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **Critical** | 2026-11-26<br>(Day 1 DEFECT-D1-01) | `PayrollService.java:105` | 4引数メソッドのみ呼出、休日割増35%/60%がデッドコード化 | DB DDL追加、6引数 `calculateDailyPay` 完全結合、休日手当の独立集計 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **High** | 2026-11-27<br>(Day 1 DEFECT-D1-02) | `AttendanceTimeCalculator.java` / `PayrollService.java` | 出勤行単位の `net - 480` により分割勤務で時間外0分 | 日次グルーピングおよび出勤時刻順ソート、日累計480分超過分の再配分 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **High** | 2026-11-27<br>(Day 1 DEFECT-D1-03) | `PayrollService.java:148-161` | 月中時給変更時、月60時間超25%追加加算が全スキップ | 日付順クロノロジカル累積および発生日契約時給基準の25%追加加算 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **High** | 2026-11-26<br>(Day 1 DEFECT-D1-04) | `PayrollApiController`, `AttendanceApiController` | セッション未検証、店舗ID `1L` ハードコードフォールバック | `@AuthenticationPrincipal` 必須化、店舗所有権・本人データ検証ガード実装 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **High** | 2026-11-26<br>(Day 1 DEFECT-D1-05) | `SecurityConfig.java:32-33` | `/api/**` に対する CSRF 保護の全機能停止 | `CookieCsrfTokenRepository` 適用および Fetch API ヘッダー連携 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **High** | 2026-11-27<br>(Day 1 DEFECT-D1-06) | `audit/runs/` | `.gitignore` 除外により5層検証の物理的証拠が消失 | `.gitignore` ルール撤廃、マスター検証パイプライン実行および領収書永続化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-07) | `PayrollService.java:201-260` | 非ロック状態での確定・支払判定によるレースコンディション | `findByIdForUpdate` 先行行ロック獲得後の状態判定フローへ再構築 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-08) | `application.yaml:8-9` | `root/1234` DBパスワードの平文露出 | `${DB_USER:root}`, `${DB_PASSWORD:1234}` 環境変数化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-09) | `README.md` / `sprint_roadmap_plan.md` | ER図テーブル名相違、ポート相違、マイルストーン表記衝突 | 実装DDLおよび設定値への完全同期、ロードマップ進捗の整合化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-10) | `SecurityConfig.java:44` | `/members/sample` が `permitAll` 設定され、会員情報露出リスク | 公開パスから除外、`/members/**` を `ROLE_OWNER` 専用へ厳格化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **High** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-01) | `SecurityConfig.java:62` | `maxSessionsPreventsLogin(false)` による既存打刻セッション強制切断リスク | `maxSessionsPreventsLogin(true)` への改修および後続重複ログイン遮断 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-02) | `SecurityConfig.java:70` | ログアウト時の認証オブジェクト・HTTPセッション残留リスク | `.clearAuthentication(true)` および `.invalidateHttpSession(true)` 明示 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **High** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-03) | `build.gradle:78` | Zero-Korean検証におけるハングル字母分解Unicode(`\u1100-\u11FF`)の検知漏れ | `[\uAC00-\uD7A3\u1100-\u11FF\u3130-\u318F]` への完全拡張適用 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-04) | `application.yml` | 不活性セッションタイムアウト未設定による端末放置セッション乗っ取りリスク | `server.servlet.session.timeout: 30m` 明示設定 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **Low** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-05) | `CustomAuthenticationEntryPoint.java` / `CustomAccessDeniedHandler.java` | 401/403発生時にAPIクライアントへHTMLリダイレクトが返却される問題 | REST APIリクエスト(JSON)と画面(Redirect)の動的分離ハンドラー実装 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-06) | `CustomAuthenticationEntryPoint.java` | 401未認証エラーレスポンスにおける内部例外スタックトレース等の漏洩リスク | エラーメッセージのサニタイズおよび定型JSON返却 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-07) | `CustomAccessDeniedHandler.java` | 403認可拒否時における不正アクセス試行の監査証跡欠落 | slf4j `log.warn` によるIP、URI、Staff ID、権限監査ログ出力 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-08) | `SecurityConfig.java:44` | 静的リソースに対する無認証アクセス許可パターンの過不足 | `/css/**`, `/js/**`, `/images/**`, `/favicon.ico` に限定厳格化 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **High** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-09) | `ShiftApiController.java` | セッション未検証時の Fail-Open 認可およびシフト確定時の店長権限検証欠落 | `userDetails == null` ガードおよび OWNER ロール2重チェック実装 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
+| **High** | 2026-11-27<br>(Day 2 監査 F-08) | `SecurityConfig.java` | セッション破棄イベント未検知によるセッション永続ロックアウト脆弱性 | `@Bean HttpSessionEventPublisher` 追加登録による確実な認証初期化 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
 
 ---
 
@@ -193,3 +204,10 @@ Phase 3 初期形（`fc5120d`）において検出された全重大欠陥の是
 | **05** | 2026-11-27 11:43 | 5層統合 Cloud Cross-Audit | OpenAI Codex (`gpt-6.2-astra`) | 46.00s | — | — | — | **PASS** | `audit/runs/20261127_114238_20184_codex` |
 | **06** | 2026-11-27 11:43 | 5層統合 Proof Citation Check | Proof-First Citation Verifier | 0.85s | — | — | — | **PASS** | `46 citations verified (0 errors)` |
 | **07** | 2026-11-27 11:51 | 技術実証書全域整合性監査 | Local Qwen 27B (RTX 5070 Ti) | 126.75s | 5,192 | 6,124 | 49.5 tps | **PASS** | `docs/audit_runs/.../20261127_024924_bd6bb625` |
+| **08** | 2026-11-27 12:20 | Day 2 セキュリティ設定監査 | Local Qwen 27B (RTX 5070 Ti) | 64.26s | 1,809 | 3,223 | 50.9 tps | **PASS** | `docs/audit_runs/.../20261127_031921_ef825d9c` |
+| **09** | 2026-11-27 12:26 | Day 2 5層統合パイプライン | 5-Tier Hybrid (Gradle/Qwen/Cross) | 304.30s | 19,722 | 1,681 | 46.5 tps | **PASS** | `audit/runs/20261127_122120_kintai_master_5b9d7476` |
+| **10** | 2026-11-27 15:01 | Day 2 3者完全並行Fan-out検証 | Local Qwen 27B (RTX 5070 Ti) | 20.44s | 6,783 | 858 | 49.9 tps | **PASS** | `audit/runs/20261127_150118_kintai_master_01aa0d50` |
+| **11** | 2026-11-27 15:06 | Day 2 決定論的ゲート全数通過 | Gradle 9.8.1 / JUnit 5 / 字母拡張 | 23.00s | — | — | — | **PASS** | `BUILD SUCCESSFUL (22 tests)` |
+
+---
+

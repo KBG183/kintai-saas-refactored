@@ -85,24 +85,20 @@ if ($SkipAI) {
 }
 
 # -----------------------------------------------------------------------------
-# Target Selection (git diff Funnel) & SHA-256 Context Snapshot
+# Target Selection (Pure git diff Funnel) & SHA-256 Context Snapshot
 # -----------------------------------------------------------------------------
-$coreTargets = @(
-    "src/main/java/com/example/kintai/domain/payroll/util/PayrollCalculator.java",
-    "src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java",
-    "src/main/java/com/example/kintai/domain/shift/service/ShiftService.java",
-    "src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java"
-)
-
 $diffFiles = @()
 try {
-    $gitDiffOut = & git -C $projectRoot diff --name-only HEAD 2>$null
-    if ($LASTEXITCODE -eq 0 -and $gitDiffOut) {
-        $diffFiles = @($gitDiffOut | Where-Object { $_ -match '\.(java|xml|sql)$' -and (Test-Path (Join-Path $projectRoot $_)) })
-    }
-} catch { }
+    $rawDiff = & git -C $projectRoot diff --name-only HEAD
+    $diffFiles = @($rawDiff | Where-Object { $_ -match '\.(java|xml|sql|ya?ml)$' -and (Test-Path (Join-Path $projectRoot $_)) })
+} catch {
+    Write-Host "[WARN] Git diff detection encountered: $($_.Exception.Message)" -ForegroundColor Yellow
+}
 
-$selectedRelPaths = @($coreTargets + $diffFiles | Select-Object -Unique | Where-Object { Test-Path (Join-Path $projectRoot $_) })
+$selectedRelPaths = @($diffFiles | Select-Object -Unique | Where-Object { Test-Path (Join-Path $projectRoot $_) })
+if ($selectedRelPaths.Count -eq 0) {
+    Write-Host "`n[NOTICE] No Java/XML/SQL/YAML changes detected in git diff against HEAD." -ForegroundColor Yellow
+}
 $fileHashes = [ordered]@{}
 $bundleSb = New-Object System.Text.StringBuilder
 
@@ -122,174 +118,244 @@ $bundleFile = Join-Path $runMasterDir "context_bundle.txt"
 Write-Host "  [CONTEXT] Bundled $($selectedRelPaths.Count) files with SHA-256 snapshots." -ForegroundColor Gray
 
 # -----------------------------------------------------------------------------
-# STAGE 2: Local Qwen 27B Specialized Funnel Screening (RTX 5070 Ti)
+# MULTI-AI PARALLEL AUDIT EXECUTION (Qwen 27B + Claude + Codex)
 # -----------------------------------------------------------------------------
 $qwenOutFile = Join-Path $runMasterDir "qwen_funnel_report.md"
-if (-not $SkipQwen) {
-    Write-Host "`n>>> [Stage 2/5] Running Local Qwen 27B Specialized Screening (Domain-Aware Router)..." -ForegroundColor Yellow
-    $stage2Start = Get-Date
-    $auditScript = Join-Path $env:USERPROFILE ".gemini\scripts\audit_with_hermes.ps1"
-    if (-not (Test-Path $auditScript)) {
-        $auditScript = Join-Path (Split-Path -Parent $env:USERPROFILE) "$($env:USERNAME)\.gemini\scripts\audit_with_hermes.ps1"
-    }
-
-    # Multi-domain prompt collector & merger (ADV-004 fix)
-    $promptDir = Join-Path $projectRoot "tools\prompts"
-    $matchingPrompts = [System.Collections.Generic.List[string]]::new()
-
-    if ($Domain -eq "PAYROLL" -or ($selectedRelPaths -match "Payroll|Calculator")) {
-        $p = Join-Path $promptDir "audit_labor_law_37.md"
-        if (Test-Path $p) { $matchingPrompts.Add($p) }
-    }
-    if ($Domain -eq "SHIFT" -or ($selectedRelPaths -match "Shift")) {
-        $p = Join-Path $promptDir "audit_concurrency_lock.md"
-        if (Test-Path $p) { $matchingPrompts.Add($p) }
-    }
-    if ($Domain -eq "ATTENDANCE" -or ($selectedRelPaths -match "Attendance|Security|Controller")) {
-        $p = Join-Path $promptDir "audit_idor_security.md"
-        if (Test-Path $p) { $matchingPrompts.Add($p) }
-    }
-
-    $specializedSystemPrompt = ""
-    if ($matchingPrompts.Count -gt 0) {
-        $promptBodies = @()
-        foreach ($mp in $matchingPrompts) {
-            Write-Host "  [ROUTER] Activated Specialized Prompt: $(Split-Path $mp -Leaf)" -ForegroundColor Cyan
-            $promptBodies += [System.IO.File]::ReadAllText($mp, [System.Text.Encoding]::UTF8)
-        }
-        $specializedSystemPrompt = ($promptBodies -join "`n`n---`n`n")
-    }
-
-    $stage2ShortCircuit = $false
-    if (Test-Path $auditScript) {
-        try {
-            if (-not [string]::IsNullOrWhiteSpace($specializedSystemPrompt)) {
-                & $auditScript -TargetFile $bundleFile -OutputFile $qwenOutFile -SystemPromptOverride $specializedSystemPrompt
-            } else {
-                & $auditScript -TargetFile $bundleFile -OutputFile $qwenOutFile
-            }
-            $stage2Duration = [Math]::Round(((Get-Date) - $stage2Start).TotalSeconds, 2)
-            
-            # Fail-Closed Table & Ambiguity Parser (ADV-001, ADV-002, ADV-003 fix)
-            if (Test-Path $qwenOutFile) {
-                $qwenReportText = [System.IO.File]::ReadAllText($qwenOutFile, [System.Text.Encoding]::UTF8)
-                
-                # Check for P0/P1 FAIL rows with resilient cell matching
-                $tableRowPattern = '\|\s*(?<id>[A-Z]{3}-\d+)\s*\|\s*(?<item>[^|]+)\s*\|\s*(?<sev>P0|P1|P2|Info)\s*\|\s*(?<verdict>PASS|WARN|FAIL|N/A)\s*\|\s*(?<evidence>[^|]+)\s*\|\s*(?<desc>[^|]+)\|'
-                $matches = [regex]::Matches($qwenReportText, $tableRowPattern)
-                $p0p1Failures = [System.Collections.Generic.List[string]]::new()
-
-                foreach ($m in $matches) {
-                    $sev = $m.Groups['sev'].Value.Trim()
-                    $verdict = $m.Groups['verdict'].Value.Trim()
-                    $id = $m.Groups['id'].Value.Trim()
-                    $item = $m.Groups['item'].Value.Trim()
-                    $evidence = $m.Groups['evidence'].Value.Trim()
-
-                    if (($sev -eq 'P0' -or $sev -eq 'P1') -and $verdict -eq 'FAIL') {
-                        $p0p1Failures.Add("[$id] $item ($sev FAIL at $evidence)")
-                    }
-                }
-
-                # Negative Control check: if text contains FAIL/P0 but regex matched 0 structured rows -> Parse Drift Error
-                if ($matches.Count -eq 0 -and ($qwenReportText -match '\bP0\b' -or $qwenReportText -match '\bFAIL\b')) {
-                    $p0p1Failures.Add("[PARSE_DRIFT] Report contains unparsed P0/FAIL keywords outside standard markdown table.")
-                }
-
-                if ($p0p1Failures.Count -gt 0) {
-                    Write-Host "`n  [FAIL-CLOSED ALERT] Critical Findings Detected by Local Qwen 27B:" -ForegroundColor Red
-                    foreach ($fail in $p0p1Failures) {
-                        Write-Host "    - $fail" -ForegroundColor Red
-                    }
-
-                    if (-not [string]::IsNullOrWhiteSpace($HumanOverrideReason)) {
-                        Write-Host "  [OVERRIDE ACCEPTED] Proceeding with warning due to -HumanOverrideReason: $HumanOverrideReason" -ForegroundColor Yellow
-                        $pipelineResults["Stage 2: Local Qwen Funnel"] = "WARN_OVERRIDDEN (${stage2Duration}s)"
-                    } else {
-                        $stage2ShortCircuit = $true
-                        Write-Host "  [FUNNEL SHORT-CIRCUIT] Stage 2 Local Qwen 27B caught P0/P1 defect(s). Skipping Stage 3 Cloud AI calls to save cost/time." -ForegroundColor Yellow
-                        $failClosedReasons.Add("Local Qwen 27B detected $($p0p1Failures.Count) critical P0/P1 defect(s): $($p0p1Failures -join '; ')")
-                        $pipelineResults["Stage 2: Local Qwen Funnel"] = "FAIL_CLOSED (${stage2Duration}s)"
-                    }
-                } else {
-                    $pipelineResults["Stage 2: Local Qwen Funnel"] = "DONE (${stage2Duration}s)"
-                }
-            } else {
-                $pipelineResults["Stage 2: Local Qwen Funnel"] = "FAIL_NO_OUTPUT"
-                $failClosedReasons.Add("Local Qwen 27B did not generate output file.")
-            }
-        } catch {
-            $pipelineResults["Stage 2: Local Qwen Funnel"] = "WARN_NONZERO"
-            $failClosedReasons.Add("Qwen stage returned non-zero: $($_.Exception.Message)")
-        }
-    } else {
-        $pipelineResults["Stage 2: Local Qwen Funnel"] = "SKIPPED_NO_SCRIPT"
-    }
-} else {
-    $pipelineResults["Stage 2: Local Qwen Funnel"] = "SKIPPED"
-}
-
-# -----------------------------------------------------------------------------
-# STAGE 3: Cloud AI Cross-Audit (Claude + Codex)
-# -----------------------------------------------------------------------------
 $aiReportFiles = New-Object System.Collections.Generic.List[string]
-if (Test-Path $qwenOutFile) { $aiReportFiles.Add($qwenOutFile) }
 
-function Invoke-CloudAuditStage {
-    param([string]$Name, [string]$ScriptName, [string]$PromptBody)
-    $stageStart = Get-Date
-    $promptPath = Join-Path $runMasterDir "${Name}_prompt.txt"
-    [System.IO.File]::WriteAllText($promptPath, $PromptBody, [System.Text.Encoding]::UTF8)
-    $caller = Join-Path $scriptDir $ScriptName
-
-    $beforeDirs = @(Get-ChildItem -Path (Join-Path $projectRoot "audit\runs") -Directory | Select-Object -ExpandProperty FullName)
-    try {
-        & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $caller -PromptFile $promptPath -ContextFile $bundleFile -TimeoutSeconds $TimeoutSeconds
-        $dur = [Math]::Round(((Get-Date) - $stageStart).TotalSeconds, 2)
-        $pipelineResults["Stage 3: $Name"] = "PASS (${dur}s)"
-    } catch {
-        $dur = [Math]::Round(((Get-Date) - $stageStart).TotalSeconds, 2)
-        $pipelineResults["Stage 3: $Name"] = "FAIL_OR_FINDINGS (${dur}s)"
-        $failClosedReasons.Add("$Name returned non-zero / findings.")
-    }
-
-    $afterDirs = @(Get-ChildItem -Path (Join-Path $projectRoot "audit\runs") -Directory | Where-Object { $beforeDirs -notcontains $_.FullName })
-    foreach ($ad in $afterDirs) {
-        $rep = Join-Path $ad.FullName "report.txt"
-        if (Test-Path $rep) { $aiReportFiles.Add($rep) }
-    }
+# Multi-domain prompt collector for Qwen
+$promptDir = Join-Path $projectRoot "tools\prompts"
+$matchingPrompts = [System.Collections.Generic.List[string]]::new()
+if ($Domain -eq "PAYROLL" -or ($selectedRelPaths -match "Payroll|Calculator")) {
+    $p = Join-Path $promptDir "audit_labor_law_37.md"
+    if (Test-Path $p) { $matchingPrompts.Add($p) }
+}
+if ($Domain -eq "SHIFT" -or ($selectedRelPaths -match "Shift|Mapper\.xml|\.sql")) {
+    $p = Join-Path $promptDir "audit_concurrency_lock.md"
+    if (Test-Path $p) { $matchingPrompts.Add($p) }
+}
+if ($Domain -eq "ATTENDANCE" -or ($selectedRelPaths -match "Attendance|Security|Controller|application.*\.ya?ml")) {
+    $p = Join-Path $promptDir "audit_idor_security.md"
+    if (Test-Path $p) { $matchingPrompts.Add($p) }
 }
 
-if ($stage2ShortCircuit) {
-    $pipelineResults["Stage 3: Claude"] = "SKIPPED_BY_STAGE2_FUNNEL"
-} elseif (-not $SkipClaude) {
-    Write-Host "`n>>> [Stage 3A/5] Running Anthropic Claude (Labor Law Art. 37)..." -ForegroundColor Yellow
-    $claudePrompt = @"
+$specializedSystemPrompt = ""
+if ($matchingPrompts.Count -gt 0) {
+    $promptBodies = @()
+    foreach ($mp in $matchingPrompts) {
+        Write-Host "  [ROUTER] Activated Specialized Prompt: $(Split-Path $mp -Leaf)" -ForegroundColor Cyan
+        $promptBodies += [System.IO.File]::ReadAllText($mp, [System.Text.Encoding]::UTF8)
+    }
+    $specializedSystemPrompt = ($promptBodies -join "`n`n---`n`n")
+}
+
+$claudePrompt = @"
 Audit the attached KINTAI Java files strictly against Japanese Labor Standards Act Art. 37:
 1. Overtime (+25%), Night (+25%), Night-Overtime (+50% / 150% total without double-counting), Holiday (+35%), Holiday-Night (+60%).
 2. HALF_UP 50-sen rounding and BigDecimal precision.
 3. Confirmed payroll overwrite guards and unresolved attendance checks.
-Cite evidence using [RelativeFilePath:LineNumber] and end with 'VERDICT: PASS' or 'VERDICT: FAIL'.
-"@
-    Invoke-CloudAuditStage -Name "Claude" -ScriptName "call_claude.ps1" -PromptBody $claudePrompt
-} else {
-    $pipelineResults["Stage 3: Claude"] = "SKIPPED"
-}
 
-if ($stage2ShortCircuit) {
-    $pipelineResults["Stage 3: Codex"] = "SKIPPED_BY_STAGE2_FUNNEL"
-} elseif (-not $SkipCodex) {
-    Write-Host "`n>>> [Stage 3B/5] Running OpenAI Codex (Concurrency & Locking)..." -ForegroundColor Yellow
-    $codexPrompt = @"
+OUTPUT CONSTRAINTS:
+- Do NOT write conversational prose, verbose essays, or redundant full-file quotes.
+- Output a markdown findings table followed by a structured JSON array.
+- Keep the entire response strictly concise (under 2000 tokens) to guarantee zero truncation.
+- Each finding must cite [RelativeFilePath:LineNumber], assertion, and concrete failure scenario.
+- Conclude strictly with either 'VERDICT: PASS' or 'VERDICT: FAIL'.
+"@
+
+$codexPrompt = @"
 Audit the attached KINTAI Spring Boot 4 / MyBatis services strictly for:
 1. Pessimistic locking (SELECT ... FOR UPDATE) serialization and deadlock prevention order.
 2. Transaction boundaries (@Transactional) and double-confirm overwrite guards.
 3. Tenant isolation (storeId / IDOR checks).
 Cite evidence using [RelativeFilePath:LineNumber] and end with 'VERDICT: PASS' or 'VERDICT: FAIL'.
 "@
-    Invoke-CloudAuditStage -Name "Codex" -ScriptName "call_codex.ps1" -PromptBody $codexPrompt
+
+$claudePromptPath = Join-Path $runMasterDir "Claude_prompt.txt"
+[System.IO.File]::WriteAllText($claudePromptPath, $claudePrompt, [System.Text.Encoding]::UTF8)
+
+$codexPromptPath = Join-Path $runMasterDir "Codex_prompt.txt"
+[System.IO.File]::WriteAllText($codexPromptPath, $codexPrompt, [System.Text.Encoding]::UTF8)
+
+$auditScript = Join-Path $env:USERPROFILE ".gemini\scripts\audit_with_hermes.ps1"
+if (-not (Test-Path $auditScript)) {
+    $auditScript = Join-Path (Split-Path -Parent $env:USERPROFILE) "$($env:USERNAME)\.gemini\scripts\audit_with_hermes.ps1"
+}
+$callerClaude = Join-Path $scriptDir "call_claude.ps1"
+$callerCodex = Join-Path $scriptDir "call_codex.ps1"
+
+$jobs = @{}
+$jobStartTimes = @{}
+Write-Host "`n>>> [Stages 2 & 3] Launching Multi-AI Parallel Outer Gate (Fan-out)..." -ForegroundColor Yellow
+
+# 1. Launch Qwen Job
+if (-not $SkipQwen -and (Test-Path $auditScript)) {
+    Write-Host "  [FAN-OUT] Launching Local Qwen 27B (Remote RTX 5070 Ti)..." -ForegroundColor Cyan
+    $jobStartTimes["Qwen"] = Get-Date
+    $qwenBlock = {
+        param($auditScript, $bundleFile, $qwenOutFile, $sysPrompt, $workDir)
+        Set-Location $workDir
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        $qwenOutputDir = Split-Path -Parent $qwenOutFile
+        if (-not [string]::IsNullOrWhiteSpace($sysPrompt)) {
+            & $auditScript -TargetFile $bundleFile -OutputFile $qwenOutFile -OutputDir $qwenOutputDir -SystemPromptOverride $sysPrompt
+        } else {
+            & $auditScript -TargetFile $bundleFile -OutputFile $qwenOutFile -OutputDir $qwenOutputDir
+        }
+        return $LASTEXITCODE
+    }
+    $jobs["Qwen"] = Start-Job -ScriptBlock $qwenBlock -ArgumentList $auditScript, $bundleFile, $qwenOutFile, $specializedSystemPrompt, $projectRoot
+} else {
+    $pipelineResults["Stage 2: Local Qwen Funnel"] = if ($SkipQwen) { "SKIPPED" } else { "SKIPPED_NO_SCRIPT" }
+}
+
+# 2. Launch Claude Job
+$claudeBeforeDirs = @(Get-ChildItem -Path (Join-Path $projectRoot "audit\runs") -Directory | Select-Object -ExpandProperty FullName)
+if (-not $SkipClaude) {
+    Write-Host "  [FAN-OUT] Launching Anthropic Claude Sonnet 5.5 (Cloud API)..." -ForegroundColor Cyan
+    $jobStartTimes["Claude"] = Get-Date
+    $cloudBlock = {
+        param($caller, $promptPath, $bundleFile, $timeout)
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $caller -PromptFile $promptPath -ContextFile $bundleFile -TimeoutSeconds $timeout
+        return $LASTEXITCODE
+    }
+    $jobs["Claude"] = Start-Job -ScriptBlock $cloudBlock -ArgumentList $callerClaude, $claudePromptPath, $bundleFile, $TimeoutSeconds
+} else {
+    $pipelineResults["Stage 3: Claude"] = "SKIPPED"
+}
+
+# 3. Launch Codex Job
+$codexBeforeDirs = @(Get-ChildItem -Path (Join-Path $projectRoot "audit\runs") -Directory | Select-Object -ExpandProperty FullName)
+if (-not $SkipCodex) {
+    Write-Host "  [FAN-OUT] Launching OpenAI Codex CLI (CLI Engine)..." -ForegroundColor Cyan
+    $jobStartTimes["Codex"] = Get-Date
+    $cloudBlock = {
+        param($caller, $promptPath, $bundleFile, $timeout)
+        [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+        $OutputEncoding = [System.Text.Encoding]::UTF8
+        & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $caller -PromptFile $promptPath -ContextFile $bundleFile -TimeoutSeconds $timeout
+        return $LASTEXITCODE
+    }
+    $jobs["Codex"] = Start-Job -ScriptBlock $cloudBlock -ArgumentList $callerCodex, $codexPromptPath, $bundleFile, $TimeoutSeconds
 } else {
     $pipelineResults["Stage 3: Codex"] = "SKIPPED"
+}
+
+# Wait for all parallel jobs to complete
+if ($jobs.Count -gt 0) {
+    Write-Host "  [SYNC] Waiting for all $($jobs.Count) AI audit engines to finish concurrently..." -ForegroundColor Yellow
+    $allJobsList = @($jobs.Values)
+    $null = Wait-Job -Job $allJobsList -Timeout ($TimeoutSeconds + 60)
+}
+
+# Harvest Qwen Results
+if ($jobs.ContainsKey("Qwen")) {
+    $job = $jobs["Qwen"]
+    $qwenExit = Receive-Job -Job $job
+    Remove-Job -Job $job -Force
+    $dur = [Math]::Round(((Get-Date) - $jobStartTimes["Qwen"]).TotalSeconds, 2)
+    
+    if (Test-Path $qwenOutFile) {
+        $aiReportFiles.Add($qwenOutFile)
+        $qwenReportText = [System.IO.File]::ReadAllText($qwenOutFile, [System.Text.Encoding]::UTF8)
+        $tableRowPattern = '\|\s*(?<id>[A-Z]{3}-\d+)\s*\|\s*(?<item>[^|]+)\s*\|\s*(?<sev>P0|P1|P2|Info)\s*\|\s*(?<verdict>PASS|WARN|FAIL|N/A)\s*\|\s*(?<evidence>[^|]+)\s*\|\s*(?<desc>[^|]+)\|'
+        $matches = [regex]::Matches($qwenReportText, $tableRowPattern)
+        $p0p1Failures = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($m in $matches) {
+            $sev = $m.Groups['sev'].Value.Trim()
+            $verdict = $m.Groups['verdict'].Value.Trim()
+            $id = $m.Groups['id'].Value.Trim()
+            $item = $m.Groups['item'].Value.Trim()
+            $evidence = $m.Groups['evidence'].Value.Trim()
+
+            if (($sev -eq 'P0' -or $sev -eq 'P1') -and ($verdict -match 'FAIL|WARN')) {
+                $p0p1Failures.Add("[$id] $item ($sev $verdict at $evidence)")
+            }
+        }
+
+        if ($matches.Count -eq 0 -and ($qwenReportText -match '\bP0\b' -or $qwenReportText -match '\bFAIL\b')) {
+            $p0p1Failures.Add("[PARSE_DRIFT] Report contains unparsed P0/FAIL keywords outside standard markdown table.")
+        }
+
+        if ($p0p1Failures.Count -gt 0) {
+            Write-Host "`n  [FAIL-CLOSED ALERT] Critical Findings Detected by Local Qwen 27B:" -ForegroundColor Red
+            foreach ($fail in $p0p1Failures) {
+                Write-Host "    - $fail" -ForegroundColor Red
+            }
+            if (-not [string]::IsNullOrWhiteSpace($HumanOverrideReason)) {
+                Write-Host "  [OVERRIDE ACCEPTED] Proceeding with warning due to -HumanOverrideReason: $HumanOverrideReason" -ForegroundColor Yellow
+                $pipelineResults["Stage 2: Local Qwen Funnel"] = "WARN_OVERRIDDEN (${dur}s)"
+            } else {
+                $failClosedReasons.Add("Local Qwen 27B detected $($p0p1Failures.Count) critical P0/P1 defect(s): $($p0p1Failures -join '; ')")
+                $pipelineResults["Stage 2: Local Qwen Funnel"] = "FAIL_CLOSED (${dur}s, $($p0p1Failures.Count) findings)"
+            }
+        } else {
+            $pipelineResults["Stage 2: Local Qwen Funnel"] = "DONE (${dur}s)"
+        }
+    } else {
+        $pipelineResults["Stage 2: Local Qwen Funnel"] = "FAIL_NO_OUTPUT (${dur}s)"
+        $failClosedReasons.Add("Local Qwen 27B did not generate output file.")
+    }
+}
+
+# Harvest Claude Results
+if ($jobs.ContainsKey("Claude")) {
+    $job = $jobs["Claude"]
+    $rawClaudeOutput = @(Receive-Job -Job $job)
+    Remove-Job -Job $job -Force
+    $dur = [Math]::Round(((Get-Date) - $jobStartTimes["Claude"]).TotalSeconds, 2)
+    
+    $afterDirs = @(Get-ChildItem -Path (Join-Path $projectRoot "audit\runs") -Directory | Where-Object { $claudeBeforeDirs -notcontains $_.FullName })
+    foreach ($ad in $afterDirs) {
+        $rep = Join-Path $ad.FullName "report.txt"
+        if (Test-Path $rep) { $aiReportFiles.Add($rep) }
+    }
+    
+    $claudeExit = 0
+    if ($rawClaudeOutput.Count -gt 0) {
+        $lastVal = $rawClaudeOutput[-1]
+        if ($lastVal -match '^\d+$') { $claudeExit = [int]$lastVal }
+        elseif ($rawClaudeOutput -match 'Verdict:\s*FAIL') { $claudeExit = 1 }
+    }
+    
+    if ($claudeExit -ne 0) {
+        $pipelineResults["Stage 3: Claude"] = "FAIL_CLOSED (${dur}s, exit code $claudeExit)"
+        $failClosedReasons.Add("Claude returned non-zero exit code $claudeExit.")
+    } else {
+        $pipelineResults["Stage 3: Claude"] = "PASS (${dur}s)"
+    }
+}
+
+# Harvest Codex Results
+if ($jobs.ContainsKey("Codex")) {
+    $job = $jobs["Codex"]
+    $rawCodexOutput = @(Receive-Job -Job $job)
+    Remove-Job -Job $job -Force
+    $dur = [Math]::Round(((Get-Date) - $jobStartTimes["Codex"]).TotalSeconds, 2)
+    
+    $afterDirs = @(Get-ChildItem -Path (Join-Path $projectRoot "audit\runs") -Directory | Where-Object { $codexBeforeDirs -notcontains $_.FullName })
+    foreach ($ad in $afterDirs) {
+        $rep = Join-Path $ad.FullName "report.txt"
+        if (Test-Path $rep) { $aiReportFiles.Add($rep) }
+    }
+    
+    $codexExit = 0
+    if ($rawCodexOutput.Count -gt 0) {
+        $lastVal = $rawCodexOutput[-1]
+        if ($lastVal -match '^\d+$') { $codexExit = [int]$lastVal }
+        elseif ($rawCodexOutput -match 'Verdict:\s*FAIL') { $codexExit = 1 }
+    }
+    
+    if ($codexExit -ne 0) {
+        $pipelineResults["Stage 3: Codex"] = "FAIL_CLOSED (${dur}s, exit code $codexExit)"
+        $failClosedReasons.Add("Codex returned non-zero exit code $codexExit.")
+    } else {
+        $pipelineResults["Stage 3: Codex"] = "PASS (${dur}s)"
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -363,6 +429,7 @@ if ($failClosedReasons.Count -gt 0) {
 }
 $pipelineResults["Stage 5: Final Gate"] = $finalGateStatus
 
+$receiptRel = "audit/runs/${timestamp}_kintai_master_${runGuid}".Replace('\', '/')
 $summaryReport = [ordered]@{
     timestamp             = $timestamp
     domain                = $Domain
@@ -370,10 +437,20 @@ $summaryReport = [ordered]@{
     stages                = $pipelineResults
     fail_closed_reasons   = $failClosedReasons
     human_override_reason = $HumanOverrideReason
-    receipt               = $runMasterDir
+    receipt               = $receiptRel
 }
 $summaryJson = $summaryReport | ConvertTo-Json -Depth 5
+$summaryJson = $summaryJson -replace [regex]::Escape($projectRoot), "." -replace '[\uAC00-\uD7A3]+', 'Desktop'
 [System.IO.File]::WriteAllText((Join-Path $runMasterDir "master_summary.json"), $summaryJson, [System.Text.Encoding]::UTF8)
+
+# Auto-sanitize generated markdown reports to prevent local path leakage
+Get-ChildItem -Path $runMasterDir -Filter "*.md" | ForEach-Object {
+    $c = [System.IO.File]::ReadAllText($_.FullName, [System.Text.Encoding]::UTF8)
+    $clean = $c -replace [regex]::Escape($projectRoot), "." -replace '[\uAC00-\uD7A3]+', 'Desktop'
+    if ($clean -ne $c) {
+        [System.IO.File]::WriteAllText($_.FullName, $clean, [System.Text.Encoding]::UTF8)
+    }
+}
 
 Write-Host "`n==========================================================================" -ForegroundColor Cyan
 Write-Host " [KINTAI HYBRID QA v2.0] Execution Summary" -ForegroundColor Cyan

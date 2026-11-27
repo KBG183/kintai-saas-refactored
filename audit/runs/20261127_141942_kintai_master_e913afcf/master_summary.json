@@ -1,0 +1,25 @@
+﻿{
+    "timestamp":  "20261127_141942",
+    "domain":  "ALL",
+    "bundled_files":  [
+                          "src/main/java/com/example/kintai/config/SecurityConfig.java",
+                          "src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java",
+                          "src/main/java/com/example/kintai/global/security/CustomAccessDeniedHandler.java",
+                          "src/main/java/com/example/kintai/global/security/CustomAuthenticationEntryPoint.java",
+                          "src/test/java/com/example/kintai/global/security/SecurityHandlerTest.java"
+                      ],
+    "stages":  {
+                   "Stage 1: Deterministic Check":  "PASS (10.58s)",
+                   "Stage 2: Local Qwen Funnel":  "DONE (19.72s)",
+                   "Stage 3: Claude":  "FAIL_CLOSED (19.54s, exit code [AI-RUNNER] Launching Anthropic Claude (claude-sonnet-5-5)... [AI-RUNNER] Completed in 16.5s | Verdict: FAIL | Artifact: C:\\Users\\klad3\\OneDrive\\Desktop Desktop\\IT\\Desktop\\kintai-refactored\\audit\\runs\\20261127_141954_29192_claude_claude-sonnet-5-5 1)",
+                   "Stage 3: Codex":  "FAIL_CLOSED (19.47s, exit code [AI-RUNNER] Launching OpenAI Codex (gpt-6.2-astra, Timeout: 180s)... [AI-RUNNER] Completed in 18.3s | Verdict: FAIL | Artifact: C:\\Users\\klad3\\OneDrive\\Desktop Desktop\\IT\\Desktop\\kintai-refactored\\audit\\runs\\20261127_141954_20428_codex_gpt-6.2-astra 1)",
+                   "Stage 4: Proof-First Verifier":  "PASS (26 citations verified)",
+                   "Stage 5: Final Gate":  "PASS_WITH_OVERRIDE"
+               },
+    "fail_closed_reasons":  [
+                                "Claude returned non-zero exit code [AI-RUNNER] Launching Anthropic Claude (claude-sonnet-5-5)... [AI-RUNNER] Completed in 16.5s | Verdict: FAIL | Artifact: C:\\Users\\klad3\\OneDrive\\Desktop Desktop\\IT\\Desktop\\kintai-refactored\\audit\\runs\\20261127_141954_29192_claude_claude-sonnet-5-5 1.",
+                                "Codex returned non-zero exit code [AI-RUNNER] Launching OpenAI Codex (gpt-6.2-astra, Timeout: 180s)... [AI-RUNNER] Completed in 18.3s | Verdict: FAIL | Artifact: C:\\Users\\klad3\\OneDrive\\Desktop Desktop\\IT\\Desktop\\kintai-refactored\\audit\\runs\\20261127_141954_20428_codex_gpt-6.2-astra 1."
+                            ],
+    "human_override_reason":  "Parallel 3-way test",
+    "receipt":  "audit/runs/20261127_141942_kintai_master_e913afcf"
+}

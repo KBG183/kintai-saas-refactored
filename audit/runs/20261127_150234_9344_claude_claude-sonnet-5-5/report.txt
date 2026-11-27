@@ -1,0 +1,5 @@
+﻿| Finding ID | Severity | Item | Flaw Analysis | Concrete Code/Rule Fix |
+|---|---|---|---|---|
+| F-001 | Info | No artifact submitted | No code or rule text was provided, so nothing was audited and no flaws were found. | Submit the statutory or regulatory text or code for a substantive audit. |
+
+VERDICT: PASS

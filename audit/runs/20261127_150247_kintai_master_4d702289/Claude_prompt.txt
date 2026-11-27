@@ -1,0 +1,11 @@
+﻿Audit the attached KINTAI Java files strictly against Japanese Labor Standards Act Art. 37:
+1. Overtime (+25%), Night (+25%), Night-Overtime (+50% / 150% total without double-counting), Holiday (+35%), Holiday-Night (+60%).
+2. HALF_UP 50-sen rounding and BigDecimal precision.
+3. Confirmed payroll overwrite guards and unresolved attendance checks.
+
+OUTPUT CONSTRAINTS:
+- Do NOT write conversational prose, verbose essays, or redundant full-file quotes.
+- Output a markdown findings table followed by a structured JSON array.
+- Keep the entire response strictly concise (under 2000 tokens) to guarantee zero truncation.
+- Each finding must cite [RelativeFilePath:LineNumber], assertion, and concrete failure scenario.
+- Conclude strictly with either 'VERDICT: PASS' or 'VERDICT: FAIL'.

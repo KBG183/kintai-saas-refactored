@@ -1,0 +1,10 @@
+﻿**점포 격리 검사가 일부 입력에서 생략됩니다.** 또한 제공된 번들에는 `ShiftService` 구현과 MyBatis 매퍼 SQL이 없어, 시프트 확정의 동시성 보장은 미검증 상태입니다.
+
+| 감사 항목 | 판정 | 코드 근거 |
+|---|---|---|
+| 점포 격리 | **FAIL** | `getEvents`는 인증 주체 또는 주체의 `storeId`가 `null`이면 소속 점포 검사를 건너뛰고 요청의 `storeId`로 조회를 위임합니다. `requestShift`도 주체의 `storeStaffId`나 `storeId`가 없으면 해당 비교를 생략하고 요청 DTO를 서비스에 전달합니다. 이 조건에서 컨트롤러가 요청을 허용하는 것은 확인되며, 실제 조회·저장 여부는 서비스 구현에 달려 있습니다. [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:39] [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:42] [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:54] [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:62] |
+| 확정 대상의 점포 소유권 | **미검증** | 확정 경로에는 `OWNER` 역할 제한이 있습니다. 컨트롤러도 역할을 확인하지만, 대상 시프트의 소속 점포를 대조하지 않고 `shiftId`와 DTO만 서비스에 전달합니다. 서비스나 매퍼가 인증 주체의 점포로 갱신 범위를 제한하는지는 확인할 수 없습니다. [src/main/java/com/example/kintai/config/SecurityConfig.java:55] [src/main/java/com/example/kintai/config/SecurityConfig.java:58] [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:75] [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:79] |
+| 비관적 잠금 및 교착 방지 | **미검증** | 번들에서 확인되는 확정 처리의 마지막 지점은 서비스 호출입니다. `SELECT ... FOR UPDATE`의 대상과 실행 시점, 같은 행을 변경하는 경로 간 잠금 획득 순서를 판정할 SQL과 호출 순서가 필요합니다. [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:79] |
+| 트랜잭션 및 이중 확정 방지 | **미검증** | 서비스의 `@Transactional` 경계, 잠금 후 상태 재검사, 또는 확정 가능 상태에서만 성공하는 조건부 갱신을 확인할 수 없습니다. 동일 시프트에 대한 두 번째 확정이 기존 값을 덮어쓰는지도 미확인입니다. [src/main/java/com/example/kintai/domain/shift/controller/ShiftApiController.java:79] |
+
+VERDICT: FAIL

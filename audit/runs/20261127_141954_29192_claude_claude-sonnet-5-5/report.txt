@@ -1,0 +1,28 @@
+﻿### Scope Finding
+
+The bundle contains **no payroll or wage-calculation code**. Provided files: SecurityConfig, ShiftApiController, two security handlers, one handler test. Art. 37 premium calculation, HALF_UP rounding, BigDecimal handling, and payroll overwrite/attendance guards **cannot be verified**. The cited calculators/services (PayrollService, attendance, etc.) are absent. Below are verifiable findings relevant to payroll-adjacent integrity.
+
+| Finding ID | Severity | Item | Flaw Analysis | Concrete Code/Rule Fix |
+|---|---|---|---|---|
+| F-01 | CRITICAL | Art. 37 calculator [NOT PROVIDED] | No code for +25% OT / +25% night / +50% night-OT / +35% holiday / +60% holiday-night. Compliance is unverifiable and must be treated as unaudited, not passing. | Supply `PayrollCalculator`/`PayrollService` + tests. Required: night-OT rate=1.50 total (not 1.25×1.25=1.5625); holiday-night=1.60; OT>8h/day or >40h/week. |
+| F-02 | CRITICAL | Rounding/BigDecimal [NOT PROVIDED] | HALF_UP 50-sen rule (<0.50 down, ≥0.50 up per Art. 37 admin guidance) not auditable. | Use `BigDecimal` with `RoundingMode.HALF_UP` at 0 scale; never `double`. Test 0.49/0.50/0.51. |
+| F-03 | CRITICAL | Confirmed-payroll overwrite guard / unresolved attendance check [NOT PROVIDED] | No payroll status or attendance resolution logic present. | Reject recalculation when status=CONFIRMED; block confirm while attendance has unresolved mod-requests or missing clock-out. |
+| F-04 | HIGH | [ShiftApiController.java:69-77] `confirmShift` | `userDetails` is accepted but unused. No store-ownership check, unlike `getEvents` (L39) and `requestShift` (L55-60). An OWNER of store A can confirm any shift ID of store B (IDOR), altering scheduled hours that feed OT/night/holiday classification. | In `confirmShift`, load shift, compare `shift.getStoreId()` with `userDetails.getStoreId()`; throw 403 on mismatch. Prefer enforcing in `ShiftService`. |
+| F-05 | HIGH | [ShiftApiController.java:39,54-61] null-guarded authorization | Checks run only `if userDetails != null && storeId != null`. A null principal or null `storeId` skips the check entirely (fail-open). | Fail closed: `if (userDetails == null \|\| !Objects.equals(userDetails.getStoreId(), storeId)) throw 403`. |
+| F-06 | HIGH | [SecurityConfig.java:57,69] `/api/shifts/*/confirm` ordering | OWNER rule precedes broader `/api/shifts/**` so ordering is correct; however `/attendance/mod-requests/**` and `/api/attendance/mod-requests/**` rely on matcher order. Reordering would let STAFF approve their own corrections (affects paid hours). | Add `@PreAuthorize("hasRole('OWNER')")` on the confirm/approve methods (method security already enabled, L25) as defense-in-depth. |
+| F-07 | MEDIUM | [SecurityConfig.java:39] CSRF cookie `withHttpOnlyFalse()` | Token readable by JS; any XSS enables forged payroll/confirm requests. | Keep only if SPA requires it; add CSP, and `SameSite=Lax/Strict` on session cookie. |
+| F-08 | MEDIUM | [SecurityConfig.java:98-99] `maximumSessions(2)`, no timeout | Account sharing/concurrent logins allowed for a punch-clock system; clock-in attribution (wage basis) can be spoofed. | `maximumSessions(1)`; set `server.servlet.session.timeout`; add session-fixation `migrateSession`. |
+| F-09 | LOW | [SecurityHandlerTest.java:1-72] | Tests cover only 401/403 handlers; zero tests for payroll, rounding, premium rates, overwrite guards. | Add parameterized tests for each Art. 37 rate case and CONFIRMED-overwrite rejection. |
+| F-10 | LOW | [CustomAccessDeniedHandler.java:41] | Authenticated-but-denied page users are redirected to `/login?denied=true`, losing context. | Redirect to `/403` page instead. |
+
+```json
+[
+ {"id":"F-01","file":"N/A","line":null,"assertion":"Art.37 premium rates unverifiable","scenario":"Night-OT computed as 1.25*1.25=1.5625 undetected"},
+ {"id":"F-02","file":"N/A","line":null,"assertion":"HALF_UP/BigDecimal unverifiable","scenario":"0.50 yen truncated, underpayment"},
+ {"id":"F-03","file":"N/A","line":null,"assertion":"Overwrite/attendance guards unverifiable","scenario":"Confirmed payroll silently recalculated"},
+ {"id":"F-04","file":"ShiftApiController.java","line":75,"assertion":"No store scoping on confirmShift","scenario":"Owner A PUT /api/shifts/{B-shift}/confirm succeeds"},
+ {"id":"F-05","file":"ShiftApiController.java","line":39,"assertion":"Null-guarded authz fails open","scenario":"storeId null in principal bypasses check"}
+]
+```
+
+VERDICT: FAIL

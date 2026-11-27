@@ -24,7 +24,7 @@
 
 ## 2. 出力フォーマット（厳格遵守）
 
-以下のMarkdown表形式のみで出力してください。挨拶文や前置き・後書きは一切不要です。
+以下のMarkdown表形式に続けて、機械検証用の構造化Finding JSONブロックを必ず出力してください。挨拶文や前置き・後書きは一切不要です。
 
 | Finding ID | Audit Item | Severity (P0/P1/P2/Info) | Verdict (PASS / WARN / FAIL / N/A) | Code Line & Evidence | Detailed Analysis & Remediation |
 |---|---|---|---|---|---|
@@ -33,3 +33,19 @@
 | SEC-03 | RBAC権限アノテーションの網羅性 | P0 | PASS/FAIL | `PayrollController.java:L25` | ... |
 | SEC-04 | データ更新クエリの二重条件絞り込み | P1 | PASS/FAIL | `AttendanceMapper.xml:L45` | ... |
 | SEC-05 | 入力バリデーション (`@Valid`) | P2 | PASS/FAIL | `ShiftRequestDto.java:L15` | ... |
+
+```json
+[
+  {
+    "finding_id": "SEC-01",
+    "file_line": "RelativePath.java:L123",
+    "assertion": "具体的な主張・欠陥内容",
+    "failure_scenario": {
+      "input": "具体的な入力値・リクエスト条件",
+      "wrong_result": "発生する不正なアクセス・他店舗漏洩・例外"
+    },
+    "severity": "P0",
+    "verdict": "FAIL"
+  }
+]
+```

@@ -28,7 +28,7 @@
 
 ## 2. 出力フォーマット（厳格遵守）
 
-以下のMarkdown表形式のみで出力してください。挨拶文や前置き・後書きは一切不要です。
+以下のMarkdown表形式に続けて、機械検証用の構造化Finding JSONブロックを必ず出力してください。挨拶文や前置き・後書きは一切不要です。
 
 | Finding ID | Audit Item | Severity (P0/P1/P2/Info) | Verdict (PASS / WARN / FAIL / N/A) | Code Line & Evidence | Detailed Analysis & Remediation |
 |---|---|---|---|---|---|
@@ -38,3 +38,19 @@
 | LAB-04 | 休日深夜労働重畳割増 (1.60) | P0 | PASS/FAIL | `PayrollCalculator.java:L90` | ... |
 | LAB-05 | 1円未満端数処理 (`HALF_UP`) | P1 | PASS/FAIL | `PayrollCalculator.java:L115` | ... |
 | LAB-06 | 浮動小数点型混入排除 | P0 | PASS/FAIL | `PayrollCalculator.java:L20` | ... |
+
+```json
+[
+  {
+    "finding_id": "LAB-01",
+    "file_line": "RelativePath.java:L123",
+    "assertion": "具体的な主張・法的違反内容",
+    "failure_scenario": {
+      "input": "具体的な労働時間・時給・勤務区分",
+      "wrong_result": "計算される不正な金額・端数処理エラー・法的未達"
+    },
+    "severity": "P0",
+    "verdict": "FAIL"
+  }
+]
+```

@@ -1,0 +1,38 @@
+﻿{
+    "model":  "claude-sonnet-5-5",
+    "id":  "msg_011ChSvdw3z2DKaagfdPaHwP",
+    "type":  "message",
+    "role":  "assistant",
+    "content":  [
+                    {
+                        "type":  "thinking",
+                        "thinking":  "",
+                        "signature":  "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"
+                    },
+                    {
+                        "type":  "text",
+                        "text":  "| Finding ID | Severity | Item | Flaw Analysis | Concrete Code/Rule Fix |\n|---|---|---|---|---|\n| F-001 | Info | No artifact submitted | No code or rule text was provided, so nothing was audited and no flaws were found. | Submit the statutory or regulatory text or code for a substantive audit. |\n\nVERDICT: PASS"
+                    }
+                ],
+    "container":  null,
+    "stop_reason":  "end_turn",
+    "stop_sequence":  null,
+    "stop_details":  null,
+    "usage":  {
+                  "input_tokens":  168,
+                  "cache_creation_input_tokens":  0,
+                  "cache_read_input_tokens":  0,
+                  "cache_creation":  {
+                                         "ephemeral_5m_input_tokens":  0,
+                                         "ephemeral_1h_input_tokens":  0
+                                     },
+                  "output_tokens":  451,
+                  "output_tokens_details":  {
+                                                "thinking_tokens":  322
+                                            },
+                  "service_tier":  "standard",
+                  "inference_geo":  "global",
+                  "speed":  "standard"
+              },
+    "diagnostics":  null
+}

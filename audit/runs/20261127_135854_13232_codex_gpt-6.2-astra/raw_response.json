@@ -1,4 +1,34 @@
-﻿=== [BUNDLE: src/main/java/com/example/kintai/domain/payroll/util/PayrollCalculator.java | LINES: 139 | SHA256: 410D37282BF5] ===
+﻿제공된 서비스 코드에서 급여 재계산과 확정의 잠금 순서가 반대이고, 근태 수정 심사는 잠금을 기다린 뒤에도 이전 `PENDING` 판정을 사용합니다. 급여 재계산과 근태 수정에서는 잠금·검증 대상이 실제 저장 대상과 같은 매장에 속하는지도 확인하지 않습니다.
+
+| 번호 | 감사 항목 | 근거와 영향 |
+|---|---|---|
+| 1 | 급여 잠금 순서 역전 | 재계산은 직원 행을 먼저 잠그고 급여 행을 잠급니다. 확정과 지급은 급여 행을 먼저 잠그고 직원 행을 잠급니다. 같은 급여에 대해 두 트랜잭션이 각각 첫 잠금을 보유하면 서로의 두 번째 잠금을 기다릴 수 있습니다. 세 경로 모두 직원 행 → 급여 행 순서로 통일해야 합니다. [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:57] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:60] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:255] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:261] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:307] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:313] |
+| 2 | 근태 수정 중복 심사 | 신청 조회와 `PENDING` 검사가 직원 잠금 획득 전에 끝납니다. 두 심사가 모두 검사를 통과하면 두 번째 심사는 대기 후에도 승인 처리를 진행할 수 있습니다. 신규 근태 생성 경로에서는 최종 심사 상태를 갱신하기 전에 근태를 삽입하므로, 중복 승인은 근태 중복 생성으로 이어질 수 있습니다. 직원 잠금 후 신청 행을 잠금 조회하고 상태를 다시 검사해야 합니다. [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:240] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:251] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:256] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:329] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:337] |
+| 3 | 시프트 재확정 덮어쓰기 | `confirmShift`는 직원 잠금을 획득하지만, 획득 후 시프트 상태를 확인하지 않습니다. 중복 시간 검사에서도 자기 행은 제외되므로, 같은 시프트에 대한 두 번째 확정이 서비스 검사를 통과해 확정 시간과 휴게시간을 다시 기록할 수 있습니다. 잠금 후 `SUBMITTED` 상태를 확인하고 조건부 갱신의 영향 행 수를 검사해야 합니다. [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:82] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:88] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:100] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:115] |
+| 4 | 근태 수정 대상과 잠금 대상 불일치 | 신청 시 요청의 직원·근무일로 잠금과 급여 확정 검사를 수행한 뒤, 별도 `attendanceId`로 원본을 조회해 원본의 매장 ID를 요청에 복사합니다. 원본 직원·근무일과 요청 값의 일치 검사는 없습니다. 심사 시 매장 소유자 검사가 있어도 신청 직원·날짜로 검사한 뒤 별도 ID의 근태를 갱신하므로, 실제 수정 대상의 잠금과 급여 확정 보호가 누락될 수 있습니다. [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:163] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:166] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:181] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:186] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:247] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:259] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:302] |
+| 5 | 급여의 매장 경계 | 월 일괄 경로는 매장별 직원 목록을 사용합니다. 그러나 공개 메서드 `calculatePayrollForStaff`는 `storeId`와 `staffId`를 독립적으로 받고, 직원 ID로 잠금·조회를 수행한 뒤 전달받은 매장 ID로 급여를 저장합니다. 상세 조회·확정·지급 역시 서비스 안에서 호출자의 매장과 급여의 매장을 대조하지 않습니다. [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:47] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:55] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:60] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:218] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:255] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:307] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:330] |
+| 6 | 시프트·타각의 매장 경계 | 시프트 신청과 출근 타각은 요청의 직원 ID로 잠금을 잡고 요청의 매장 ID를 그대로 저장합니다. 시프트 확정은 시프트 ID만으로 대상을 조회합니다. 근태 강제 종료는 `reviewerId`를 받지만 대상 매장에 대한 심사 권한을 확인하지 않고 근태를 갱신합니다. [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:44] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:64] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:82] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:38] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:73] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:344] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:399] |
+
+**트랜잭션 경계.** 월 일괄 재계산과 급여 확정에는 각각 외부 진입점에 쓰기용 `@Transactional`이 있으므로 내부 재계산 호출도 기존 트랜잭션에 참여합니다. 급여 재계산은 잠금 조회 후 `DRAFT`를 요구하고, 확정도 `DRAFT`를 검사합니다. 지급은 `CONFIRMED` 상태와 갱신 행 수를 확인합니다. 급여 경로에서 확인된 핵심 결함은 잠금 획득 순서입니다. [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:38] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:61] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:252] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:264] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:281] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:320]
+
+판정 범위는 첨부 Java 코드의 정적 감사입니다. MyBatis 매퍼 SQL, DB 제약조건, 컨트롤러 인가 코드는 첨부되지 않아 실제 `FOR UPDATE` 절, 중복 갱신 차단 조건, 외부 요청의 접근 가능성은 미검증입니다.
+
+VERDICT: FAIL
+
+OpenAI Codex v0.167.0-alpha.4.1
+--------
+workdir: C:\Users\klad3\OneDrive\바탕 화면\IT\프로젝트\kintai-refactored\scratch\runs\unified_20261127_135854_13232_codex
+model: gpt-6.2-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: none
+reasoning summaries: none
+session id: 01a21b5e-eaf9-7e23-a7cf-96ebaefa0d10
+--------
+user
+### CONTEXT SPECIFICATION:
+=== [BUNDLE: src/main/java/com/example/kintai/domain/payroll/util/PayrollCalculator.java | LINES: 139 | SHA256: 410D37282BF5] ===
 L1: package com.example.kintai.domain.payroll.util;
 L2: 
 L3: import java.math.BigDecimal;
@@ -1076,3 +1106,30 @@ L400:         return att;
 L401:     }
 L402: }
 
+
+
+### TASK PROMPT:
+Audit the attached KINTAI Spring Boot 4 / MyBatis services strictly for:
+1. Pessimistic locking (SELECT ... FOR UPDATE) serialization and deadlock prevention order.
+2. Transaction boundaries (@Transactional) and double-confirm overwrite guards.
+3. Tenant isolation (storeId / IDOR checks).
+Cite evidence using [RelativeFilePath:LineNumber] and end with 'VERDICT: PASS' or 'VERDICT: FAIL'.
+codex
+제공된 서비스 코드에서 급여 재계산과 확정의 잠금 순서가 반대이고, 근태 수정 심사는 잠금을 기다린 뒤에도 이전 `PENDING` 판정을 사용합니다. 급여 재계산과 근태 수정에서는 잠금·검증 대상이 실제 저장 대상과 같은 매장에 속하는지도 확인하지 않습니다.
+
+| 번호 | 감사 항목 | 근거와 영향 |
+|---|---|---|
+| 1 | 급여 잠금 순서 역전 | 재계산은 직원 행을 먼저 잠그고 급여 행을 잠급니다. 확정과 지급은 급여 행을 먼저 잠그고 직원 행을 잠급니다. 같은 급여에 대해 두 트랜잭션이 각각 첫 잠금을 보유하면 서로의 두 번째 잠금을 기다릴 수 있습니다. 세 경로 모두 직원 행 → 급여 행 순서로 통일해야 합니다. [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:57] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:60] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:255] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:261] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:307] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:313] |
+| 2 | 근태 수정 중복 심사 | 신청 조회와 `PENDING` 검사가 직원 잠금 획득 전에 끝납니다. 두 심사가 모두 검사를 통과하면 두 번째 심사는 대기 후에도 승인 처리를 진행할 수 있습니다. 신규 근태 생성 경로에서는 최종 심사 상태를 갱신하기 전에 근태를 삽입하므로, 중복 승인은 근태 중복 생성으로 이어질 수 있습니다. 직원 잠금 후 신청 행을 잠금 조회하고 상태를 다시 검사해야 합니다. [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:240] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:251] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:256] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:329] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:337] |
+| 3 | 시프트 재확정 덮어쓰기 | `confirmShift`는 직원 잠금을 획득하지만, 획득 후 시프트 상태를 확인하지 않습니다. 중복 시간 검사에서도 자기 행은 제외되므로, 같은 시프트에 대한 두 번째 확정이 서비스 검사를 통과해 확정 시간과 휴게시간을 다시 기록할 수 있습니다. 잠금 후 `SUBMITTED` 상태를 확인하고 조건부 갱신의 영향 행 수를 검사해야 합니다. [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:82] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:88] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:100] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:115] |
+| 4 | 근태 수정 대상과 잠금 대상 불일치 | 신청 시 요청의 직원·근무일로 잠금과 급여 확정 검사를 수행한 뒤, 별도 `attendanceId`로 원본을 조회해 원본의 매장 ID를 요청에 복사합니다. 원본 직원·근무일과 요청 값의 일치 검사는 없습니다. 심사 시 매장 소유자 검사가 있어도 신청 직원·날짜로 검사한 뒤 별도 ID의 근태를 갱신하므로, 실제 수정 대상의 잠금과 급여 확정 보호가 누락될 수 있습니다. [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:163] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:166] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:181] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:186] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:247] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:259] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:302] |
+| 5 | 급여의 매장 경계 | 월 일괄 경로는 매장별 직원 목록을 사용합니다. 그러나 공개 메서드 `calculatePayrollForStaff`는 `storeId`와 `staffId`를 독립적으로 받고, 직원 ID로 잠금·조회를 수행한 뒤 전달받은 매장 ID로 급여를 저장합니다. 상세 조회·확정·지급 역시 서비스 안에서 호출자의 매장과 급여의 매장을 대조하지 않습니다. [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:47] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:55] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:60] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:218] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:255] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:307] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:330] |
+| 6 | 시프트·타각의 매장 경계 | 시프트 신청과 출근 타각은 요청의 직원 ID로 잠금을 잡고 요청의 매장 ID를 그대로 저장합니다. 시프트 확정은 시프트 ID만으로 대상을 조회합니다. 근태 강제 종료는 `reviewerId`를 받지만 대상 매장에 대한 심사 권한을 확인하지 않고 근태를 갱신합니다. [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:44] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:64] [src/main/java/com/example/kintai/domain/shift/service/ShiftService.java:82] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:38] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:73] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:344] [src/main/java/com/example/kintai/domain/attendance/service/AttendanceService.java:399] |
+
+**트랜잭션 경계.** 월 일괄 재계산과 급여 확정에는 각각 외부 진입점에 쓰기용 `@Transactional`이 있으므로 내부 재계산 호출도 기존 트랜잭션에 참여합니다. 급여 재계산은 잠금 조회 후 `DRAFT`를 요구하고, 확정도 `DRAFT`를 검사합니다. 지급은 `CONFIRMED` 상태와 갱신 행 수를 확인합니다. 급여 경로에서 확인된 핵심 결함은 잠금 획득 순서입니다. [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:38] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:61] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:252] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:264] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:281] [src/main/java/com/example/kintai/domain/payroll/service/PayrollService.java:320]
+
+판정 범위는 첨부 Java 코드의 정적 감사입니다. MyBatis 매퍼 SQL, DB 제약조건, 컨트롤러 인가 코드는 첨부되지 않아 실제 `FOR UPDATE` 절, 중복 갱신 차단 조건, 외부 요청의 접근 가능성은 미검증입니다.
+
+VERDICT: FAIL
+tokens used
+38,396

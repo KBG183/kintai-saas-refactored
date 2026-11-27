@@ -1,0 +1,22 @@
+﻿{
+    "timestamp":  "20261127_140910",
+    "domain":  "ALL",
+    "bundled_files":  [
+
+                      ],
+    "stages":  {
+                   "Stage 1: Deterministic Check":  "PASS (9.02s)",
+                   "Stage 2: Local Qwen Funnel":  "FAIL_CLOSED (76.33s, 5 findings)",
+                   "Stage 3: Claude":  "FAIL_CLOSED (11.37s, exit code 1)",
+                   "Stage 3: Codex":  "FAIL_CLOSED (24.61s, exit code 1)",
+                   "Stage 4: Proof-First Verifier":  "PASS (0 citations verified)",
+                   "Stage 5: Final Gate":  "FAIL_CLOSED"
+               },
+    "fail_closed_reasons":  [
+                                "Local Qwen 27B detected 5 critical P0/P1 defect(s): [ADV-001] P1 Blocked-Terminator (P0 FAIL at **SPEC_QUOTE:** \"Overtime shall not exceed 50 hours per month.\" \u003cbr\u003e **DERIVED:** If `CLOCK_OUT` validation rejects the event due to cap violation, the state remains `CLOCKED_IN`.); [ADV-002] P2 Record-vs-Reality Divergence (P1 WARN at **SPEC_QUOTE:** \"Breaks \u003e 30 mins must be deducted.\" \u003cbr\u003e **ASSUMPTION:** System auto-deducts 30 mins if `duration \u003e 4h`.); [ADV-003] P3 Boundary Instant (P1 FAIL at **SPEC_QUOTE:** \"Night work is 22:00-06:00.\" \u003cbr\u003e **DERIVED:** Calculation of night premium hours.); [ADV-004] P4 Rule Collision (P1 FAIL at **SPEC_QUOTE:** \"Retroactive edits must not violate monthly cap.\" \u003cbr\u003e **SPEC_QUOTE:** \"Manager can correct time for error.\"); [ADV-006] P6 Silent Default (P1 FAIL at **SPEC_QUOTE:** \"If break time is not recorded, default to 0.\" \u003cbr\u003e **DERIVED:** If `BREAK_END` is missing, `break_duration = 0`.)",
+                                "Claude returned non-zero exit code 1.",
+                                "Codex returned non-zero exit code 1."
+                            ],
+    "human_override_reason":  "",
+    "receipt":  "audit/runs/20261127_140910_kintai_master_e2535981"
+}
