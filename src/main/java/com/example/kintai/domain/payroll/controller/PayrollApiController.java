@@ -6,9 +6,12 @@ import com.example.kintai.domain.payroll.dto.PayrollDetailResponseDto;
 import com.example.kintai.domain.payroll.dto.PayrollDto;
 import com.example.kintai.domain.payroll.service.PayrollService;
 import com.example.kintai.global.common.ApiResponse;
+import com.example.kintai.global.security.CustomUserDetails;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -32,8 +35,10 @@ public class PayrollApiController {
     @GetMapping("/list")
     public ResponseEntity<ApiResponse<List<PayrollDto>>> getPayrollList(
             @RequestParam("storeId") Long storeId,
-            @RequestParam("yearMonth") String yearMonth
+            @RequestParam("yearMonth") String yearMonth,
+            @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
+        validateStoreOwnerAccess(userDetails, storeId);
         List<PayrollDto> list = payrollService.getPayrollsByStoreAndMonth(storeId, yearMonth);
         return ResponseEntity.ok(ApiResponse.ok("給与一覧を取得しました。", list));
     }
@@ -43,8 +48,10 @@ public class PayrollApiController {
      */
     @PostMapping("/calculate")
     public ResponseEntity<ApiResponse<Void>> calculateMonthlyPayroll(
-            @RequestBody PayrollCalculateRequestDto requestDto
+            @RequestBody PayrollCalculateRequestDto requestDto,
+            @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
+        validateStoreOwnerAccess(userDetails, requestDto.getStoreId());
         payrollService.calculateMonthlyPayroll(requestDto.getStoreId(), requestDto.getTargetYearMonth());
         return ResponseEntity.ok(ApiResponse.ok("給与計算が完了しました。", null));
     }
@@ -55,8 +62,10 @@ public class PayrollApiController {
     @PostMapping("/{payrollId}/confirm")
     public ResponseEntity<ApiResponse<Void>> confirmPayroll(
             @PathVariable("payrollId") Long payrollId,
-            @RequestBody(required = false) PayrollConfirmRequestDto confirmDto
+            @RequestBody(required = false) PayrollConfirmRequestDto confirmDto,
+            @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
+        validatePayrollAccess(userDetails, payrollId);
         payrollService.confirmPayroll(payrollId, confirmDto);
         return ResponseEntity.ok(ApiResponse.ok("給与が確定されました。", null));
     }
@@ -66,8 +75,10 @@ public class PayrollApiController {
      */
     @GetMapping("/{payrollId}/detail")
     public ResponseEntity<ApiResponse<PayrollDetailResponseDto>> getPayrollDetail(
-            @PathVariable("payrollId") Long payrollId
+            @PathVariable("payrollId") Long payrollId,
+            @AuthenticationPrincipal CustomUserDetails userDetails
     ) {
+        validatePayrollAccess(userDetails, payrollId);
         PayrollDetailResponseDto detail = payrollService.getPayrollDetail(payrollId);
         return ResponseEntity.ok(ApiResponse.ok("給与明細詳細を取得しました。", detail));
     }
@@ -78,8 +89,10 @@ public class PayrollApiController {
     @GetMapping("/excel")
     public ResponseEntity<byte[]> downloadExcel(
             @RequestParam("storeId") Long storeId,
-            @RequestParam("yearMonth") String yearMonth
+            @RequestParam("yearMonth") String yearMonth,
+            @AuthenticationPrincipal CustomUserDetails userDetails
     ) throws IOException {
+        validateStoreOwnerAccess(userDetails, storeId);
         byte[] excelBytes = payrollService.exportPayrollToExcel(storeId, yearMonth);
 
         String fileName = URLEncoder.encode("給与台帳_" + yearMonth + ".xlsx", StandardCharsets.UTF_8).replace("+", "%20");
@@ -88,5 +101,36 @@ public class PayrollApiController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"; filename*=UTF-8''" + fileName)
                 .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(excelBytes);
+    }
+
+    private void validateStoreOwnerAccess(CustomUserDetails userDetails, Long storeId) {
+        if (userDetails == null || !"ROLE_OWNER".equals(userDetails.getRole())) {
+            throw new AccessDeniedException("オーナー権限が必要です。");
+        }
+        if (userDetails.getStoreId() != null && !userDetails.getStoreId().equals(storeId)) {
+            throw new AccessDeniedException("アクセス権限のない店舗です。(ID: " + storeId + ")");
+        }
+    }
+
+    private void validatePayrollAccess(CustomUserDetails userDetails, Long payrollId) {
+        if (userDetails == null) {
+            throw new AccessDeniedException("認証が必要です。");
+        }
+        PayrollDetailResponseDto detail = payrollService.getPayrollDetail(payrollId);
+        if (detail == null) {
+            throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
+        }
+        Long payrollStoreId = detail.getStoreId();
+        Long staffId = detail.getStoreStaffId();
+
+        if ("ROLE_OWNER".equals(userDetails.getRole())) {
+            if (userDetails.getStoreId() != null && !userDetails.getStoreId().equals(payrollStoreId)) {
+                throw new AccessDeniedException("他店舗の給与データにはアクセスできません。");
+            }
+        } else {
+            if (userDetails.getStoreStaffId() == null || !userDetails.getStoreStaffId().equals(staffId)) {
+                throw new AccessDeniedException("他スタッフの給与明細にはアクセスできません。");
+            }
+        }
     }
 }

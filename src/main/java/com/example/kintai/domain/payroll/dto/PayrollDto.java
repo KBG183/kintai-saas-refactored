@@ -20,6 +20,7 @@ public class PayrollDto {
     private Integer basePay;
     private Integer nightAllowance;
     private Integer overtimeAllowance;
+    private Integer holidayAllowance;
     private Integer transportAllowance;
     private Integer grossPay;
     private String payrollStatus;
@@ -75,6 +76,9 @@ public class PayrollDto {
 
     public Integer getOvertimeAllowance() { return overtimeAllowance; }
     public void setOvertimeAllowance(Integer overtimeAllowance) { this.overtimeAllowance = overtimeAllowance; }
+
+    public Integer getHolidayAllowance() { return holidayAllowance; }
+    public void setHolidayAllowance(Integer holidayAllowance) { this.holidayAllowance = holidayAllowance; }
 
     public Integer getTransportAllowance() { return transportAllowance; }
     public void setTransportAllowance(Integer transportAllowance) { this.transportAllowance = transportAllowance; }

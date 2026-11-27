@@ -13,9 +13,11 @@ public class PayrollDailyDetailDto {
     private Integer nightWorkMinutes;
     private Integer overtimeMinutes;
     private Integer nightOvertimeMinutes;
+    private Boolean isStatutoryHoliday = false;
     private Integer basePay;
     private Integer nightAllowance;
     private Integer overtimeAllowance;
+    private Integer holidayAllowance;
     private Integer transportAmount;
 
     public PayrollDailyDetailDto() {}
@@ -58,6 +60,12 @@ public class PayrollDailyDetailDto {
 
     public Integer getOvertimeAllowance() { return overtimeAllowance; }
     public void setOvertimeAllowance(Integer overtimeAllowance) { this.overtimeAllowance = overtimeAllowance; }
+
+    public Boolean getIsStatutoryHoliday() { return isStatutoryHoliday; }
+    public void setIsStatutoryHoliday(Boolean isStatutoryHoliday) { this.isStatutoryHoliday = isStatutoryHoliday; }
+
+    public Integer getHolidayAllowance() { return holidayAllowance; }
+    public void setHolidayAllowance(Integer holidayAllowance) { this.holidayAllowance = holidayAllowance; }
 
     public Integer getTransportAmount() { return transportAmount; }
     public void setTransportAmount(Integer transportAmount) { this.transportAmount = transportAmount; }

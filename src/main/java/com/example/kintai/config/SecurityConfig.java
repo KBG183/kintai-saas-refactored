@@ -28,9 +28,9 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // REST API エンドポイントに対する CSRF 緩和（SPA/Fetch API との連携を考慮）
+                // REST API および SPA/Fetch API との連携を考慮した Cookie ベースの CSRF 保護
                 .csrf(csrf -> csrf
-                        .ignoringRequestMatchers("/api/**")
+                        .csrfTokenRepository(org.springframework.security.web.csrf.CookieCsrfTokenRepository.withHttpOnlyFalse())
                 )
                 .authorizeHttpRequests(auth -> auth
                         // 静的リソースおよび認証関連エンドポイントの開放

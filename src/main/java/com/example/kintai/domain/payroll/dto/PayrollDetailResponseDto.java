@@ -4,6 +4,8 @@ import java.util.List;
 
 public class PayrollDetailResponseDto {
     private Long payrollId;
+    private Long storeId;
+    private Long storeStaffId;
     private String staffName;
     private String targetYearMonth;
     private Integer appliedHourlyWage;
@@ -92,6 +94,10 @@ public class PayrollDetailResponseDto {
 
     public Long getPayrollId() { return payrollId; }
     public void setPayrollId(Long payrollId) { this.payrollId = payrollId; }
+    public Long getStoreId() { return storeId; }
+    public void setStoreId(Long storeId) { this.storeId = storeId; }
+    public Long getStoreStaffId() { return storeStaffId; }
+    public void setStoreStaffId(Long storeStaffId) { this.storeStaffId = storeStaffId; }
     public String getStaffName() { return staffName; }
     public void setStaffName(String staffName) { this.staffName = staffName; }
     public String getTargetYearMonth() { return targetYearMonth; }

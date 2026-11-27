@@ -19,6 +19,8 @@ public interface PayrollMapper {
 
     PayrollDto findById(@Param("payrollId") Long payrollId);
 
+    PayrollDto findByIdForUpdate(@Param("payrollId") Long payrollId);
+
     PayrollDto findByStaffAndMonthForUpdate(
             @Param("storeStaffId") Long storeStaffId,
             @Param("targetYearMonth") String targetYearMonth

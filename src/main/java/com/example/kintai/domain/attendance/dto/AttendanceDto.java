@@ -19,6 +19,7 @@ public class AttendanceDto {
     private Integer nightWorkMinutes;
     private Integer overtimeMinutes;
     private String clockInMethod;
+    private Boolean isStatutoryHoliday = false;
     private String attendanceStatus;
 
     public AttendanceDto() {}
@@ -67,6 +68,9 @@ public class AttendanceDto {
 
     public String getClockInMethod() { return clockInMethod; }
     public void setClockInMethod(String clockInMethod) { this.clockInMethod = clockInMethod; }
+
+    public Boolean getIsStatutoryHoliday() { return isStatutoryHoliday; }
+    public void setIsStatutoryHoliday(Boolean isStatutoryHoliday) { this.isStatutoryHoliday = isStatutoryHoliday; }
 
     public String getAttendanceStatus() { return attendanceStatus; }
     public void setAttendanceStatus(String attendanceStatus) { this.attendanceStatus = attendanceStatus; }

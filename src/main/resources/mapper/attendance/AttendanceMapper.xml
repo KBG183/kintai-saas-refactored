@@ -20,6 +20,7 @@
             night_work_minutes,
             overtime_minutes,
             clock_in_method,
+            is_statutory_holiday,
             attendance_status
         FROM attendance
         WHERE store_staff_id = #{storeStaffId}
@@ -44,6 +45,7 @@
             night_work_minutes,
             overtime_minutes,
             clock_in_method,
+            is_statutory_holiday,
             attendance_status
         FROM attendance
         WHERE attendance_id = #{attendanceId}
@@ -64,6 +66,7 @@
             night_work_minutes,
             overtime_minutes,
             clock_in_method,
+            is_statutory_holiday,
             attendance_status
         ) VALUES (
             #{storeId},
@@ -79,6 +82,7 @@
             #{nightWorkMinutes},
             #{overtimeMinutes},
             #{clockInMethod},
+            #{isStatutoryHoliday},
             #{attendanceStatus}
         )
     </insert>
@@ -92,6 +96,7 @@
             net_work_minutes = #{netWorkMinutes},
             night_work_minutes = #{nightWorkMinutes},
             overtime_minutes = #{overtimeMinutes},
+            is_statutory_holiday = #{isStatutoryHoliday},
             attendance_status = #{attendanceStatus},
             updated_at = CURRENT_TIMESTAMP
         WHERE attendance_id = #{attendanceId}
@@ -167,6 +172,7 @@
             night_work_minutes,
             overtime_minutes,
             clock_in_method,
+            is_statutory_holiday,
             attendance_status
         FROM attendance
         WHERE store_staff_id = #{storeStaffId}

@@ -80,12 +80,39 @@ public class PayrollService {
         int totalBasePay = 0;
         int totalNightAllowance = 0;
         int totalOvertimeAllowance = 0;
+        int totalHolidayAllowance = 0;
         int totalTransportAllowance = 0;
 
         Set<Integer> uniqueWages = new HashSet<>();
         Set<LocalDate> workedDates = new HashSet<>();
 
         List<PayrollDailyDetailDto> detailsToInsert = new ArrayList<>();
+
+        // 分割勤務（Split Shift）対応: 同一日付の勤務をグルーピングし、1日8時間(480分)超過判定を日次累積で補正
+        Map<LocalDate, List<AttendanceDto>> attendancesByDate = new LinkedHashMap<>();
+        for (AttendanceDto att : attendances) {
+            attendancesByDate.computeIfAbsent(att.getWorkDate(), k -> new ArrayList<>()).add(att);
+        }
+
+        // 分割勤務の時間外労働時間の再配分
+        for (Map.Entry<LocalDate, List<AttendanceDto>> entry : attendancesByDate.entrySet()) {
+            List<AttendanceDto> dayList = entry.getValue();
+            // 出勤時刻順の厳密なソート保証 (ADV-002 欠陥是正)
+            dayList.sort(java.util.Comparator.comparing(AttendanceDto::getClockInAt, java.util.Comparator.nullsLast(java.util.Comparator.naturalOrder())));
+            int dayAccumulatedNet = 0;
+            for (AttendanceDto att : dayList) {
+                int prevAccumulated = dayAccumulatedNet;
+                dayAccumulatedNet += att.getNetWorkMinutes();
+                if (dayAccumulatedNet > 480) {
+                    int dayOvertime = (prevAccumulated >= 480)
+                            ? att.getNetWorkMinutes()
+                            : (dayAccumulatedNet - 480);
+                    att.setOvertimeMinutes(dayOvertime);
+                } else {
+                    att.setOvertimeMinutes(0);
+                }
+            }
+        }
 
         for (AttendanceDto att : attendances) {
             LocalDate workDate = att.getWorkDate();
@@ -101,12 +128,19 @@ public class PayrollService {
                 throw new IllegalStateException("勤務日 (" + workDate + ") の契約時給が無効です。(時給: " + hourlyWage + "円)");
             }
 
-            // 日別計算（端数は HALF_UP で厳密に丸め）
+            boolean isStatutoryHoliday = Boolean.TRUE.equals(att.getIsStatutoryHoliday());
+            int nightOvertime = (att.getOvertimeMinutes() > 0 && att.getNightWorkMinutes() > 0)
+                    ? Math.min(att.getOvertimeMinutes(), att.getNightWorkMinutes())
+                    : 0;
+
+            // 6引数完全版日別計算（労基法第37条: 法定休日35%、休日深夜60%、時間外25%、深夜25%、深夜時間外50%）
             PayrollCalculator.DailyPayResult dailyPay = PayrollCalculator.calculateDailyPay(
                     hourlyWage,
                     att.getNetWorkMinutes(),
                     att.getNightWorkMinutes(),
-                    att.getOvertimeMinutes()
+                    att.getOvertimeMinutes(),
+                    nightOvertime,
+                    isStatutoryHoliday
             );
 
             // 1日1回通勤手当支給および月額上限枠内での配分
@@ -125,8 +159,8 @@ public class PayrollService {
             totalOvertimeMinutes += att.getOvertimeMinutes();
             totalBasePay += dailyPay.basePay();
             totalNightAllowance += dailyPay.nightAllowance();
-            // 留意: 割増率は加算方式（深夜25% + 残業25% = 50%）のため、二重加算を防止し overtime と holiday を集計
-            totalOvertimeAllowance += dailyPay.overtimeAllowance() + dailyPay.holidayAllowance();
+            totalOvertimeAllowance += dailyPay.overtimeAllowance();
+            totalHolidayAllowance += dailyPay.holidayAllowance();
 
             PayrollDailyDetailDto detail = new PayrollDailyDetailDto();
             detail.setAttendanceId(att.getAttendanceId());
@@ -137,9 +171,11 @@ public class PayrollService {
             detail.setNightWorkMinutes(att.getNightWorkMinutes());
             detail.setOvertimeMinutes(att.getOvertimeMinutes());
             detail.setNightOvertimeMinutes(dailyPay.nightOvertimeMinutes());
+            detail.setIsStatutoryHoliday(isStatutoryHoliday);
             detail.setBasePay(dailyPay.basePay());
             detail.setNightAllowance(dailyPay.nightAllowance());
             detail.setOvertimeAllowance(dailyPay.overtimeAllowance());
+            detail.setHolidayAllowance(dailyPay.holidayAllowance());
             detail.setTransportAmount(transportAmount);
 
             detailsToInsert.add(detail);
@@ -148,19 +184,35 @@ public class PayrollService {
         Integer appliedHourlyWage = (uniqueWages.size() == 1) ? uniqueWages.iterator().next() : null;
 
         // 労働基準法第37条第1項但書: 月60時間超法定時間外労働割増 (25%追加加算 = 計50%割増、深夜重複時は計75%割増/175%支給)
-        // 累積3,600分 (60時間) を超える残業分に対して追加法定割増 (時給 * 0.25) を一括加算
+        // 累積3,600分 (60時間) を超える残業分に対して追加法定割増を算出（時給変更時も発生日の契約時給で正確に加算）
+        int cumulativeOvertime = 0;
         int over60OvertimeAllowance = 0;
-        if (totalOvertimeMinutes > 3600 && appliedHourlyWage != null && appliedHourlyWage > 0) {
-            int excessMinutes = totalOvertimeMinutes - 3600;
-            // 追加25%割増: appliedHourlyWage * 0.25 * excessMinutes / 60 = appliedHourlyWage * excessMinutes / 240
-            over60OvertimeAllowance = PayrollCalculator.yenRound(
-                    java.math.BigDecimal.valueOf(appliedHourlyWage).multiply(java.math.BigDecimal.valueOf(excessMinutes)),
-                    240
-            );
-            totalOvertimeAllowance += over60OvertimeAllowance;
-        }
+        for (AttendanceDto att : attendances) {
+            int dayOvertime = (att.getOvertimeMinutes() != null) ? att.getOvertimeMinutes() : 0;
+            if (dayOvertime <= 0) continue;
 
-        int grossPay = totalBasePay + totalNightAllowance + totalOvertimeAllowance + totalTransportAllowance;
+            Integer wageVal = payrollMapper.findHourlyWageForStaffOnDate(staffId, att.getWorkDate());
+            int wage = (wageVal != null) ? wageVal : 0;
+            if (wage <= 0) continue;
+
+            int prevCumulative = cumulativeOvertime;
+            cumulativeOvertime += dayOvertime;
+
+            if (cumulativeOvertime > 3600) {
+                int excessInThisDay = (prevCumulative >= 3600)
+                        ? dayOvertime
+                        : (cumulativeOvertime - 3600);
+
+                int additionalAllowance = PayrollCalculator.yenRound(
+                        java.math.BigDecimal.valueOf(wage).multiply(java.math.BigDecimal.valueOf(excessInThisDay)),
+                        240
+                );
+                over60OvertimeAllowance += additionalAllowance;
+            }
+        }
+        totalOvertimeAllowance += over60OvertimeAllowance;
+
+        int grossPay = totalBasePay + totalNightAllowance + totalOvertimeAllowance + totalHolidayAllowance + totalTransportAllowance;
 
         PayrollDto payroll = new PayrollDto();
         payroll.setStoreId(storeId);
@@ -177,6 +229,7 @@ public class PayrollService {
         payroll.setBasePay(totalBasePay);
         payroll.setNightAllowance(totalNightAllowance);
         payroll.setOvertimeAllowance(totalOvertimeAllowance);
+        payroll.setHolidayAllowance(totalHolidayAllowance);
         payroll.setTransportAllowance(totalTransportAllowance);
         payroll.setGrossPay(grossPay);
         payroll.setPayrollStatus("DRAFT");
@@ -198,17 +251,19 @@ public class PayrollService {
      */
     @Transactional
     public void confirmPayroll(Long payrollId, PayrollConfirmRequestDto confirmDto) {
-        PayrollDto existing = payrollMapper.findById(payrollId);
+        // 排他制御: 先行して行ロック(FOR UPDATE)を獲得
+        PayrollDto existing = payrollMapper.findByIdForUpdate(payrollId);
         if (existing == null) {
             throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
         }
 
+        // 階層型排他制御: store_staff ロック
+        payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
+
+        // ロック獲得後の最新ステータス検証
         if (!"DRAFT".equals(existing.getPayrollStatus())) {
             throw new IllegalStateException("既に確定済みの給与データです。");
         }
-
-        // 排他制御: 悲観的ロック
-        payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
 
         // 精算対象期間終了の検証（締め期間終了前の早期確定を防止, JSTタイムゾーン基準）
         LocalDate todayJst = LocalDate.now(ZoneId.of("Asia/Tokyo"));
@@ -248,7 +303,8 @@ public class PayrollService {
      */
     @Transactional
     public void payPayroll(Long payrollId) {
-        PayrollDto existing = payrollMapper.findById(payrollId);
+        // 排他制御: 先行して行ロック(FOR UPDATE)を獲得
+        PayrollDto existing = payrollMapper.findByIdForUpdate(payrollId);
         if (existing == null) {
             throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
         }
@@ -256,6 +312,7 @@ public class PayrollService {
         // 階層型排他制御: Level 1 store_staff ロック
         payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
 
+        // ロック獲得後の最新ステータス検証
         if (!"CONFIRMED".equals(existing.getPayrollStatus())) {
             throw new IllegalStateException("確定(CONFIRMED)状態の給与データのみ支払処理が可能です。(現在の状態: " + existing.getPayrollStatus() + ")");
         }
@@ -279,6 +336,8 @@ public class PayrollService {
 
         PayrollDetailResponseDto response = new PayrollDetailResponseDto();
         response.setPayrollId(payroll.getPayrollId());
+        response.setStoreId(payroll.getStoreId());
+        response.setStoreStaffId(payroll.getStoreStaffId());
         response.setStaffName(payroll.getStaffName());
         response.setTargetYearMonth(payroll.getTargetYearMonth());
         response.setAppliedHourlyWage(payroll.getAppliedHourlyWage());

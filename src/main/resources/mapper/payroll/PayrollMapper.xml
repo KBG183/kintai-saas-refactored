@@ -22,6 +22,7 @@
             p.base_pay,
             p.night_allowance,
             p.overtime_allowance,
+            p.holiday_allowance,
             p.transport_allowance,
             p.gross_pay,
             p.payroll_status,
@@ -53,6 +54,7 @@
             p.base_pay,
             p.night_allowance,
             p.overtime_allowance,
+            p.holiday_allowance,
             p.transport_allowance,
             p.gross_pay,
             p.payroll_status,
@@ -81,6 +83,7 @@
             p.base_pay,
             p.night_allowance,
             p.overtime_allowance,
+            p.holiday_allowance,
             p.transport_allowance,
             p.gross_pay,
             p.payroll_status,
@@ -108,6 +111,7 @@
             base_pay,
             night_allowance,
             overtime_allowance,
+            holiday_allowance,
             transport_allowance,
             gross_pay,
             payroll_status
@@ -126,6 +130,7 @@
             #{basePay},
             #{nightAllowance},
             #{overtimeAllowance},
+            #{holidayAllowance},
             #{transportAllowance},
             #{grossPay},
             #{payrollStatus}
@@ -140,6 +145,7 @@
             base_pay = IF(payroll.payroll_status = 'DRAFT', VALUES(base_pay), payroll.base_pay),
             night_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(night_allowance), payroll.night_allowance),
             overtime_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(overtime_allowance), payroll.overtime_allowance),
+            holiday_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(holiday_allowance), payroll.holiday_allowance),
             transport_allowance = IF(payroll.payroll_status = 'DRAFT', VALUES(transport_allowance), payroll.transport_allowance),
             gross_pay = IF(payroll.payroll_status = 'DRAFT', VALUES(gross_pay), payroll.gross_pay),
             updated_at = IF(payroll.payroll_status = 'DRAFT', CURRENT_TIMESTAMP, payroll.updated_at)
@@ -156,9 +162,11 @@
             night_work_minutes,
             overtime_minutes,
             night_overtime_minutes,
+            is_statutory_holiday,
             base_pay,
             night_allowance,
             overtime_allowance,
+            holiday_allowance,
             transport_amount
         ) VALUES (
             #{payrollId},
@@ -170,9 +178,11 @@
             #{nightWorkMinutes},
             #{overtimeMinutes},
             #{nightOvertimeMinutes},
+            #{isStatutoryHoliday},
             #{basePay},
             #{nightAllowance},
             #{overtimeAllowance},
+            #{holidayAllowance},
             #{transportAmount}
         )
     </insert>
@@ -189,9 +199,11 @@
             night_work_minutes,
             overtime_minutes,
             night_overtime_minutes,
+            is_statutory_holiday,
             base_pay,
             night_allowance,
             overtime_allowance,
+            holiday_allowance,
             transport_amount
         FROM payroll_daily_detail
         WHERE payroll_id = #{payrollId}
@@ -280,6 +292,34 @@
         FROM store_staff
         WHERE store_id = #{storeId}
           AND employment_status = 'ACTIVE'
+    </select>
+
+    <select id="findByIdForUpdate" resultType="com.example.kintai.domain.payroll.dto.PayrollDto">
+        SELECT
+            p.payroll_id,
+            p.store_id,
+            p.store_staff_id,
+            p.target_year_month,
+            p.range_start_date,
+            p.range_end_date,
+            p.work_days_count,
+            p.total_work_minutes,
+            p.total_night_minutes,
+            p.total_overtime_minutes,
+            p.applied_hourly_wage,
+            p.applied_transport_limit,
+            p.base_pay,
+            p.night_allowance,
+            p.overtime_allowance,
+            p.holiday_allowance,
+            p.transport_allowance,
+            p.gross_pay,
+            p.payroll_status,
+            p.confirmed_at,
+            p.paid_at
+        FROM payroll p
+        WHERE p.payroll_id = #{payrollId}
+        FOR UPDATE
     </select>
 
 </mapper>

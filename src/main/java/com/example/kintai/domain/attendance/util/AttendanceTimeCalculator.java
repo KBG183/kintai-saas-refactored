@@ -27,8 +27,19 @@ public final class AttendanceTimeCalculator {
             int totalBreakMinutes,
             int netWorkMinutes,
             int nightWorkMinutes,
-            int overtimeMinutes
-    ) {}
+            int overtimeMinutes,
+            int nightOvertimeMinutes
+    ) {
+        public CalculationResult(
+                int totalStayMinutes,
+                int totalBreakMinutes,
+                int netWorkMinutes,
+                int nightWorkMinutes,
+                int overtimeMinutes
+        ) {
+            this(totalStayMinutes, totalBreakMinutes, netWorkMinutes, nightWorkMinutes, overtimeMinutes, 0);
+        }
+    }
 
     /**
      * 出退勤時刻および休憩区間一覧に基づき、実労働、深夜労働、法定時間外残業を分単位で厳密に算出
@@ -72,24 +83,50 @@ public final class AttendanceTimeCalculator {
             throw new IllegalArgumentException("休憩時間が総滞在時間以上になることはできません。");
         }
 
-        int netWorkMinutes = totalStayMinutes - totalBreakMinutes;
-        int overtimeMinutes = Math.max(0, netWorkMinutes - 480); // 1日8時間（480分）超過分
+        // 分単位シミュレーションによる深夜労働・時間外・深夜残業の厳密な判定
+        int workedMinutes = 0;
+        int nightWorkMinutes = 0;
+        int overtimeMinutes = 0;
+        int nightOvertimeMinutes = 0;
 
-        // 深夜時間帯（22:00 ~ 翌05:00）実労働時間計算（深夜帯と重なった休憩時間のみ控除）
-        int grossNightStayMinutes = calculateNightMinutesInRange(clockInAt, clockOutAt);
-        int nightBreakMinutes = 0;
-        for (BreakInterval b : breaks) {
-            nightBreakMinutes = Math.addExact(nightBreakMinutes,
-                    calculateNightMinutesInRange(b.startAt(), b.endAt()));
+        for (int m = 0; m < totalStayMinutes; m++) {
+            LocalDateTime currentMinute = clockInAt.plusMinutes(m);
+            LocalDateTime nextMinute = currentMinute.plusMinutes(1);
+
+            // 当該1分が休憩区間に含まれるか判定
+            boolean isBreak = false;
+            for (BreakInterval b : breaks) {
+                if (!currentMinute.isBefore(b.startAt()) && !nextMinute.isAfter(b.endAt())) {
+                    isBreak = true;
+                    break;
+                }
+            }
+
+            if (!isBreak) {
+                workedMinutes++;
+                int hour = currentMinute.getHour();
+                boolean isNight = (hour >= 22 || hour < 5);
+                boolean isOvertime = (workedMinutes > 480); // 1日8時間(480分)超過
+
+                if (isNight) {
+                    nightWorkMinutes++;
+                }
+                if (isOvertime) {
+                    overtimeMinutes++;
+                }
+                if (isNight && isOvertime) {
+                    nightOvertimeMinutes++;
+                }
+            }
         }
-        int netNightWorkMinutes = Math.max(0, grossNightStayMinutes - nightBreakMinutes);
 
         return new CalculationResult(
                 totalStayMinutes,
                 totalBreakMinutes,
-                netWorkMinutes,
-                netNightWorkMinutes,
-                overtimeMinutes
+                workedMinutes,
+                nightWorkMinutes,
+                overtimeMinutes,
+                nightOvertimeMinutes
         );
     }
 

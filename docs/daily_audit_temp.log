@@ -1,4 +1,0 @@
-﻿[2026-11-26 16:02:21 | AI-RUNNER | PayrollCalculator.java | claude:claude-sonnet-5-5 | 40.68s | Verdict:FAIL | Findings:0]
-[2026-11-26 16:04:24 | AI-RUNNER | claude_context_bundle.txt | claude:claude-sonnet-5-5 | 51.96s | Verdict:FAIL | Findings:0]
-[2026-11-26 16:06:07 | AI-RUNNER | codex_context_bundle.txt | codex: | 63.97s | Verdict:FAIL | Findings:0]
-[2026-11-26 16:25:55 | AI-RUNNER | inline-prompt | codex: | 124.28s | Verdict:FAIL | Findings:0]

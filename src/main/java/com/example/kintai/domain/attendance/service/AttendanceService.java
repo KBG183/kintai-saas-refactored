@@ -17,9 +17,11 @@ import java.util.List;
 public class AttendanceService {
 
     private final AttendanceMapper attendanceMapper;
+    private final com.example.kintai.domain.member.mapper.MemberMapper memberMapper;
 
-    public AttendanceService(AttendanceMapper attendanceMapper) {
+    public AttendanceService(AttendanceMapper attendanceMapper, com.example.kintai.domain.member.mapper.MemberMapper memberMapper) {
         this.attendanceMapper = attendanceMapper;
+        this.memberMapper = memberMapper;
     }
 
     /**
@@ -238,6 +240,12 @@ public class AttendanceService {
         AttendanceModResponseDto req = attendanceMapper.findModRequestById(modRequestId);
         if (req == null) {
             throw new IllegalArgumentException("存在しない修正申請です。(ID: " + modRequestId + ")");
+        }
+
+        // マルチテナント・オーナー権限検証: 審査者が当該店舗のオーナーであることを保証
+        Long ownerStoreId = memberMapper.findStoreIdByOwnerMemberId(reviewerId);
+        if (ownerStoreId == null || !ownerStoreId.equals(req.getStoreId())) {
+            throw new org.springframework.security.access.AccessDeniedException("他店舗の勤怠修正申請を審査することはできません。(店舗ID: " + req.getStoreId() + ")");
         }
 
         if (!"PENDING".equals(req.getApprovalStatus())) {

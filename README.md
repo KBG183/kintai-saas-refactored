@@ -116,9 +116,9 @@ erDiagram
     store ||--o{ store_staff : "店舗所属"
     member ||--o{ store_staff : "雇用契約"
     store_staff ||--o{ shift_schedule : "シフト登録"
-    store_staff ||--o{ attendance_record : "打刻実績"
-    attendance_record ||--o{ attendance_mod_request : "修正申請"
-    store_staff ||--o{ payroll_record : "月次給与"
+    store_staff ||--o{ attendance : "打刻実績"
+    attendance ||--o{ attendance_mod_request : "修正申請"
+    store_staff ||--o{ payroll : "月次給与"
 
     store {
         bigint store_id PK
@@ -127,33 +127,41 @@ erDiagram
     }
     member {
         bigint member_id PK
-        varchar login_id
+        varchar email
         varchar role "OWNER / STAFF"
     }
     store_staff {
         bigint store_staff_id PK
-        decimal hourly_wage
-        decimal daily_transport_fee
+        int hourly_wage
+        int daily_transport_fee
     }
     shift_schedule {
         bigint shift_id PK
+        date work_date
         datetime start_time
         datetime end_time
         varchar status "REQUESTED / CONFIRMED"
     }
-    attendance_record {
+    attendance {
         bigint attendance_id PK
-        datetime clock_in_time
-        datetime clock_out_time
-        int break_minutes
-        int night_break_minutes
+        date work_date
+        datetime clock_in_at
+        datetime clock_out_at
+        int total_break_minutes
+        int net_work_minutes
+        int night_work_minutes
+        int overtime_minutes
+        boolean is_statutory_holiday
     }
-    payroll_record {
+    payroll {
         bigint payroll_id PK
-        int target_year
-        int target_month
-        decimal gross_pay
-        decimal net_pay
+        char target_year_month
+        int base_pay
+        int night_allowance
+        int overtime_allowance
+        int holiday_allowance
+        int gross_pay
+        varchar payroll_status "DRAFT / CONFIRMED / PAID"
     }
 ```
 
@@ -205,11 +213,13 @@ cd kintai-saas-refactored
 ```
 
 ### 2. データベース設定
-`src/main/resources/application.properties` に MySQL 接続情報を設定します。
-```properties
-spring.datasource.url=jdbc:mysql://localhost:3306/kintai_db?useSSL=false&serverTimezone=Asia/Tokyo&characterEncoding=UTF-8
-spring.datasource.username=YOUR_USERNAME
-spring.datasource.password=YOUR_PASSWORD
+`src/main/resources/application.yaml` に MySQL 接続情報を設定します（環境変数による上書きにも対応）。
+```yaml
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/kintai_db?useSSL=false&serverTimezone=Asia/Tokyo&characterEncoding=UTF-8
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:1234}
 ```
 
 ### 3. ビルドおよび品質検証
@@ -221,7 +231,7 @@ spring.datasource.password=YOUR_PASSWORD
 ./gradlew bootRun
 ```
 
-ブラウザから `http://localhost:8080` にアクセスします。
+ブラウザから `http://localhost:8081` にアクセスします。
 
 ---
 

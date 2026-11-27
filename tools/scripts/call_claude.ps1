@@ -23,6 +23,9 @@ param(
     [int]$MaxTokens = 8192,
 
     [Parameter(Mandatory = $false)]
+    [int]$TimeoutSeconds = 180,
+
+    [Parameter(Mandatory = $false)]
     [switch]$Quiet
 )
 
