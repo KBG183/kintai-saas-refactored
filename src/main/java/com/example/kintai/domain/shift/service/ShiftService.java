@@ -78,10 +78,14 @@ public class ShiftService {
      * 店長によるシフト確定および法定休憩時間の検証
      */
     @Transactional
-    public void confirmShift(Long shiftId, ShiftConfirmDto confirmDto) {
+    public void confirmShift(Long shiftId, ShiftConfirmDto confirmDto, Long callerStoreId) {
         ShiftDto existing = shiftMapper.findById(shiftId);
         if (existing == null) {
             throw new IllegalArgumentException("存在しないシフトです。(ID: " + shiftId + ")");
+        }
+        // IDOR防御: 呼び出し者の所属店舗とシフトの店舗が一致しない場合は拒否
+        if (callerStoreId == null || !callerStoreId.equals(existing.getStoreId())) {
+            throw new org.springframework.security.access.AccessDeniedException("他店舗のシフトは確定できません。");
         }
 
         // 排他制御: シフト確定の競合を防止する悲観的ロック (store_staff 単位直列化)

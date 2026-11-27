@@ -14,6 +14,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="_csrf" th:content="${_csrf != null ? _csrf.token : ''}">
+    <meta name="_csrf_header" th:content="${_csrf != null ? _csrf.headerName : 'X-XSRF-TOKEN'}">
     <title th:replace="${title}">勤怠・シフト・給与管理システム</title>
 
     <!-- Bootstrap 5.3 CSS -->
@@ -26,6 +28,41 @@
     <!-- Bootstrap JS / jQuery: 本文内のインラインスクリプトから使えるよう head で読み込む -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+    <!-- CSRF 共通インターセプター: 全ての fetch() リクエストに CSRF トークンを自動付与 -->
+    <script>
+        (function() {
+            function getCookie(name) {
+                const match = document.cookie.match(new RegExp('(^|;\\s*)(' + name + ')=([^;]*)'));
+                return match ? decodeURIComponent(match[3]) : null;
+            }
+            const origFetch = window.fetch;
+            window.fetch = function(url, options) {
+                options = options || {};
+                const method = (options.method || 'GET').toUpperCase();
+                if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
+                    options.headers = options.headers || {};
+                    let csrfToken = getCookie('XSRF-TOKEN');
+                    if (!csrfToken) {
+                        const metaCsrf = document.querySelector('meta[name="_csrf"]');
+                        if (metaCsrf) csrfToken = metaCsrf.getAttribute('content');
+                    }
+                    const metaHeader = document.querySelector('meta[name="_csrf_header"]');
+                    const headerName = (metaHeader && metaHeader.getAttribute('content')) ? metaHeader.getAttribute('content') : 'X-XSRF-TOKEN';
+                    if (csrfToken) {
+                        if (options.headers instanceof Headers) {
+                            if (!options.headers.has(headerName)) options.headers.append(headerName, csrfToken);
+                        } else if (Array.isArray(options.headers)) {
+                            options.headers.push([headerName, csrfToken]);
+                        } else {
+                            if (!options.headers[headerName]) options.headers[headerName] = csrfToken;
+                        }
+                    }
+                }
+                return origFetch.call(this, url, options);
+            };
+        })();
+    </script>
 
     <style>
         body {

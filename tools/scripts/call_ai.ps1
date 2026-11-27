@@ -197,6 +197,9 @@ try {
             $reqObj = @{
                 model = $effectiveModel
                 max_tokens = 8192
+                thinking = @{
+                    type = "adaptive"
+                }
                 system = $effectiveSystem
                 messages = @(@{ role = "user"; content = $finalPrompt })
             }

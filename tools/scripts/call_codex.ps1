@@ -34,10 +34,22 @@ $runnerParams = @{
     Provider       = "Codex"
     TimeoutSeconds = $TimeoutSeconds
 }
-if ($Prompt) { $runnerParams["Prompt"] = $Prompt }
-if ($PromptFile) { $runnerParams["PromptFile"] = $PromptFile }
-if ($ContextFile) { $runnerParams["ContextFile"] = $ContextFile }
-if ($Model) { $runnerParams["Model"] = $Model }
+$tempPromptFile = $null
+try {
+    if ($Prompt -and -not $PromptFile) {
+        $tempPromptFile = [System.IO.Path]::GetTempFileName()
+        [System.IO.File]::WriteAllText($tempPromptFile, $Prompt, [System.Text.Encoding]::UTF8)
+        $runnerParams["PromptFile"] = $tempPromptFile
+    } elseif ($PromptFile) {
+        $runnerParams["PromptFile"] = $PromptFile
+    }
+    if ($ContextFile) { $runnerParams["ContextFile"] = $ContextFile }
+    if ($Model) { $runnerParams["Model"] = $Model }
 
-& powershell -ExecutionPolicy Bypass -File $unifiedRunner @runnerParams
-exit $LASTEXITCODE
+    & $unifiedRunner @runnerParams
+    exit $LASTEXITCODE
+} finally {
+    if ($tempPromptFile -and (Test-Path -LiteralPath $tempPromptFile)) {
+        Remove-Item -LiteralPath $tempPromptFile -Force -ErrorAction SilentlyContinue
+    }
+}

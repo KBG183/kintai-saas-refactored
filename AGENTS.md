@@ -11,38 +11,50 @@
 
 ---
 
-## 1. 統一5層ハイブリッド検証パイプライン（Unified 5-Tier Verification Pipeline）
+## 1. 統一多層ハイブリッド検証アーキテクチャ（2-Track Verification Architecture）
 本プロジェクトは単一障害点および特定モデルへの依存を排除し、決定論的静的解析と多重AIによる厳格なFail-Closedパイプラインを運用する:
 
-1. **Stage 1: 決定論的ゲート（`./gradlew check`）**:
-   - 費用0円の高速Fail-Fastゲート。
-   - コンパイル検証、JUnit 5単体/統合テスト、ArchUnit（給与・サービス層の浮動小数点型禁止、レイヤ分離規則）、MyBatis SQLインジェクション静的検知（`${}`禁止）、Zero-Korean検証を包括実行。
-2. **Stage 2: ローカルファネルスクリーニング（Local Qwen 27B）**:
-   - `git diff` 変更ファイルおよび関連サービスクラスのSHA-256スナップショットを取得。
-   - 無料の自社GPUを用いて危険個所・不変条件違反の一次スクリーニングを実施し、クラウドAIへの送信コンテキストを最適化。
-3. **Stage 3: クラウドAIクロス監査（Claude & Codex）**:
-   - **Claude**: 日本労働基準法第37条（時間外25%、深夜25%、深夜残業重複50%、法定休日35%、休日深夜60%）の計算整合性・例外分岐の推論監査。
-   - **Codex**: Spring Boot 4 / MyBatisアーキテクチャ、悲観的ロック（`SELECT ... FOR UPDATE`）の同時実行制御、IDOR（テナント分離）検証。
-4. **Stage 4: 実証引用検証（Proof-First Citation Verifier）**:
-   - AI監査レポート内の引用 `[相対パス:行番号]` が実際の `.java`/`.xml`/`.sql` コードと完全に一致するかを機械検証。
-   - 存在しないコード行の幻覚（Hallucination）引用および監査中のコンテキスト変更（Stale Context）を検知した場合は即時却下。
-5. **Stage 5: Fail-Closed判定および監査台帳保存**:
-   - 未解決のP0/P1重大欠陥が存在する場合、ビルドを非ゼロ終了コードで遮断（Fail-Closed）。
-   - 全検証ログを `audit/runs/` 配下に領収書として永続化。
+- **L0: 決定論的ゲート（`./gradlew check`）**:
+  - 費用0円の高速Fail-Fastゲート。
+  - コンパイル検証、JUnit 5単体/統合テスト、ArchUnit（給与・サービス層の浮動小数点型禁止、レイヤ分離規則）、MyBatis SQLインジェクション静的検知（`${}`禁止）、Zero-Korean検証を包括実行。
+- **L1: 日常インナーループ（ローカル Qwen 27B 単独・規則別狭小プロンプト）**:
+  - コスト0円。開発作業中の即時フィードバック専用（アドバイザリ）。
+  - IDOR有無、ロック獲得順序、37条端数処理など、単一ルールに特化した狭小プロンプトで高速反復スキャン。
+- **L2: マスタアウターゲート3者完全並行（Start-Job Fan-out: Qwen 27B + Claude Sonnet 5.5 + OpenAI Codex）**:
+  - スプリント締め時または検証時にdiff全域を3者完全並行で同時起動（所要時間を従来の約2分30秒から約30〜60秒へ短縮）。
+  - 各モデルは独立して `git diff` を検証し、全Findingを構造化JSON `[ファイル:行, 主張, 失敗シナリオ(入力値→不正結果)]` で出力。
+- **L3: 実証引用・相互反証および失敗テスト機械再現（Proof-First & Cross-Rebuttal）**:
+  - 最優先証拠: 指摘された失敗シナリオを失敗するJUnit 5テストに変換し `./gradlew check` で機械再現。再現されない空論は即時却下。
+  - 相互反証: Claudeの指摘はCodexがコードに基づき反証を試み、Codexの指摘はClaudeが反証を試みる。反証不能な指摘のみ真の欠陥と判定し、見解不一致時のみ人間にエスカレーション。
+- **L4: Fail-Closed判定および監査台帳保存**:
+  - 未解決のP0/P1重大欠陥が存在する場合、ビルドを非ゼロ終了コードで遮断（Fail-Closed）。
+  - 全検証ログを `audit/runs/` 配下に領収書として永続化。
 
 ---
 
-## 2. 5段階検証プロセス（Standard Operating Procedure）
+## 2. 5段階検証プロセスおよび高リスクルーティング
 
 ```mermaid
 flowchart LR
-    A["1. Deterministic Gate<br>(./gradlew check / ArchUnit)"] --> B["2. Local Funnel<br>(Qwen 27B Diff Screening)"]
-    B --> C["3. Cloud Cross-Audit<br>(Claude 37条 & Codex ロック)"]
-    C --> D["4. Proof-First Verifier<br>(引用コード機械照合)"]
-    D --> E["5. Fail-Closed Gate<br>(全件PASS判定・コミット承認)"]
+    A["L0: Deterministic Gate<br>(./gradlew check)"] --> B["L1: Inner Loop<br>(Local Qwen 27B)"]
+    B --> C["L2: Independent Parallel<br>(Qwen + Claude + Codex)"]
+    C --> D["L3: Evidence & Test Rebuttal<br>(Failing Test / Cross-Judge)"]
+    D --> E["L4: Fail-Closed Gate<br>(Human Override / Final Pass)"]
 ```
 
+- **[高リスクドメインルーティング]**: 以下の対象を含むdiffは必ずL2・L3監査へ自動昇格する：
+  1. 労務計算および勤怠・シフトコアService (`*Service.java`, `*Calculator.java`)
+  2. MyBatis マッパーXML (`*Mapper.xml`)
+  3. DDLおよびマイグレーションSQL (`*.sql`)
+  4. Spring Security 設定および認可ハンドラー (`SecurityConfig.java` 等)
+  5. アプリケーション設定ファイル (`application*.yml`, `application*.properties`)
 - **[コミット前ハードゲート]**: 上記の決定論的ゲートおよび多層AI監査がすべてPASSとなるまで、Gitコミットの提案は厳格に保留される。
+- **[日次スプリント1-Shot完全同期原則]**: マスタコミット直前には必ず以下の5大成果物を単一バッチ（1-Shot）で漏れなく同期する：
+  1. `docs/technical_audit_dossier.md`（日本語正本実証書：版数・是正台帳・実測値）
+  2. `docs/technical_audit_dossier_KO.md`（韓国語対照本実証書：1:1対照反映）
+  3. `docs/sprint_roadmap_plan.md` および `AGENTS.md`（日本語正本ロードマップ：完了ステータス更新）
+  4. `docs/sprint_roadmap_plan_KO.md`（韓国語対照本ロードマップ：完了ステータス更新）
+  5. `audit/runs/` 配下の物理領収書内のローカルパス除染および `docs/daily_audit_temp.log` 整理
 
 ---
 
@@ -51,7 +63,7 @@ flowchart LR
 | 日次 (Day) | 状態 | 対象ブランチ / ドメイン | 実装およびリファクタリング内容 |
 |:---:|:---:|---|---|
 | **Day 1** | **完了** | `main`（ベースライン） | 労働基準法第37条計算エンジン統合、5層ハイブリッド検証環境およびArchUnitゲート構築 |
-| **Day 2** | 待機 | `feature/auth-security` | Spring Security 6 セッション認証、RBAC権限分離、IDOR防御 |
+| **Day 2** | **完了** | `feature/auth-security` | Spring Security 6 セッション認証、RBAC権限分離、IDOR防御、9大欠陥全数是正 |
 | **Day 3** | 待機 | `feature/attendance-punch` | 4打刻ステートマシン、非同期UI連携、ゴースト打刻締め処理 |
 | **Day 4** | 待機 | `feature/shift-request` | FullCalendar連携 希望勤務シフト申請、最大16時間拘束バリデーション |
 | **Day 5** | 待機 | `feature/shift-confirm` | 店舗管理者シフト確定トランザクション、**悲観的ロック（`SELECT ... FOR UPDATE`）** 同時実行制御 |

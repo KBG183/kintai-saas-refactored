@@ -6,10 +6,12 @@ import com.example.kintai.domain.payroll.dto.*;
 import com.example.kintai.domain.payroll.mapper.PayrollMapper;
 import com.example.kintai.domain.payroll.util.PayrollCalculator;
 import com.example.kintai.domain.payroll.util.PayrollExcelExporter;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -22,10 +24,17 @@ public class PayrollService {
 
     private final PayrollMapper payrollMapper;
     private final AttendanceMapper attendanceMapper;
+    // 就業規則上の法定休日（週1回）の曜日。事業所ごとの設定値（既定: 日曜）
+    private final DayOfWeek statutoryHolidayDayOfWeek;
 
-    public PayrollService(PayrollMapper payrollMapper, AttendanceMapper attendanceMapper) {
+    public PayrollService(
+            PayrollMapper payrollMapper,
+            AttendanceMapper attendanceMapper,
+            @Value("${kintai.payroll.statutory-holiday-day-of-week:SUNDAY}") DayOfWeek statutoryHolidayDayOfWeek
+    ) {
         this.payrollMapper = payrollMapper;
         this.attendanceMapper = attendanceMapper;
+        this.statutoryHolidayDayOfWeek = statutoryHolidayDayOfWeek;
     }
 
     public List<PayrollDto> getPayrollsByStoreAndMonth(Long storeId, String targetYearMonth) {
@@ -69,6 +78,13 @@ public class PayrollService {
         }
 
         List<AttendanceDto> attendances = attendanceMapper.findCompletedAttendancesForStaffAndPeriod(staffId, startDate, endDate);
+
+        // 法定休日判定: 勤怠側のフラグ、または設定された法定休日の曜日に該当する勤務日を法定休日労働とみなす
+        for (AttendanceDto att : attendances) {
+            if (att.getWorkDate() != null && att.getWorkDate().getDayOfWeek() == statutoryHolidayDayOfWeek) {
+                att.setIsStatutoryHoliday(true);
+            }
+        }
 
         // 通勤手当上限額（1回の精算あたりの上限）の取得
         Integer transportLimitVal = payrollMapper.findTransportLimitForStaffOnDate(staffId, endDate);
@@ -190,6 +206,8 @@ public class PayrollService {
         for (AttendanceDto att : attendances) {
             int dayOvertime = (att.getOvertimeMinutes() != null) ? att.getOvertimeMinutes() : 0;
             if (dayOvertime <= 0) continue;
+            // 法定休日労働は休日割増(35%)の対象であり、月60時間超の法定時間外累積に算入しない（割増の重複防止）
+            if (Boolean.TRUE.equals(att.getIsStatutoryHoliday())) continue;
 
             Integer wageVal = payrollMapper.findHourlyWageForStaffOnDate(staffId, att.getWorkDate());
             int wage = (wageVal != null) ? wageVal : 0;
@@ -251,14 +269,18 @@ public class PayrollService {
      */
     @Transactional
     public void confirmPayroll(Long payrollId, PayrollConfirmRequestDto confirmDto) {
-        // 排他制御: 先行して行ロック(FOR UPDATE)を獲得
+        // 階層型排他制御: Level 1 store_staff を先に獲得 (calculatePayrollForStaff と同一順序: store_staff -> payroll)
+        PayrollDto preview = payrollMapper.findById(payrollId);
+        if (preview == null) {
+            throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
+        }
+        payrollMapper.lockStoreStaffForUpdate(preview.getStoreStaffId());
+
+        // Level 2: payroll 行ロック
         PayrollDto existing = payrollMapper.findByIdForUpdate(payrollId);
         if (existing == null) {
             throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
         }
-
-        // 階層型排他制御: store_staff ロック
-        payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
 
         // ロック獲得後の最新ステータス検証
         if (!"DRAFT".equals(existing.getPayrollStatus())) {
@@ -303,14 +325,18 @@ public class PayrollService {
      */
     @Transactional
     public void payPayroll(Long payrollId) {
-        // 排他制御: 先行して行ロック(FOR UPDATE)を獲得
+        // 階層型排他制御: Level 1 store_staff を先に獲得 (store_staff -> payroll)
+        PayrollDto preview = payrollMapper.findById(payrollId);
+        if (preview == null) {
+            throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
+        }
+        payrollMapper.lockStoreStaffForUpdate(preview.getStoreStaffId());
+
+        // Level 2: payroll 行ロック
         PayrollDto existing = payrollMapper.findByIdForUpdate(payrollId);
         if (existing == null) {
             throw new IllegalArgumentException("存在しない給与データです。(ID: " + payrollId + ")");
         }
-
-        // 階層型排他制御: Level 1 store_staff ロック
-        payrollMapper.lockStoreStaffForUpdate(existing.getStoreStaffId());
 
         // ロック獲得後の最新ステータス検証
         if (!"CONFIRMED".equals(existing.getPayrollStatus())) {
