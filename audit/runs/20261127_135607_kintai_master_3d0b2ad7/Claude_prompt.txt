@@ -1,5 +1,0 @@
-﻿Audit the attached KINTAI Java files strictly against Japanese Labor Standards Act Art. 37:
-1. Overtime (+25%), Night (+25%), Night-Overtime (+50% / 150% total without double-counting), Holiday (+35%), Holiday-Night (+60%).
-2. HALF_UP 50-sen rounding and BigDecimal precision.
-3. Confirmed payroll overwrite guards and unresolved attendance checks.
-Cite evidence using [RelativeFilePath:LineNumber] and end with 'VERDICT: PASS' or 'VERDICT: FAIL'.

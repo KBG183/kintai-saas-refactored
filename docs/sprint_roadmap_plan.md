@@ -76,6 +76,10 @@
 - [ ] **DEFECT-D7-01**: `PayrollService.java:57, 255` - ロック獲得順序の不一致（デッドロック要因: スタッフ→給与 vs 給与→スタッフ）を `スタッフ → 給与` の単一順序へ統一。
 - [ ] **DEFECT-D7-02**: `PayrollService.java` - 基発150号行政通達に準拠した日次端数処理と月間累計端数処理の整合性維持。
 
+### [Day 9: 打刻修正申請および承認ワークフロー] `feature/mod-workflow`
+- [ ] **DEFECT-D9-01**: `AttendanceMapper.xml` / `PayrollService.java` - 打刻事後修正承認時における確定・ドラフト給与再計算トリガーの連動欠落防止（古い給与データの残存抑止）。
+- [ ] **DEFECT-D9-02**: `SecurityConfig.java` / `AttendanceApiController.java` - 打刻修正申請における一般スタッフ向け申請パスと店長専任決裁（承認・却下）パスの認可境界分離。
+
 ---
 
 ## 🎯 各スプリント（日次）標準作業リズム (Daily Rhythm)

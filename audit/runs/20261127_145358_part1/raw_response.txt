@@ -1,8 +1,0 @@
-﻿| ID | Verdict | Evidence |
-| :--- | :--- | :--- |
-| D2-01 | PASS | `sessionManagement` block contains `.maximumSessions(2)` and `.maxSessionsPreventsLogin(true)`. |
-| D2-02 | PASS | `logout` block contains `.clearAuthentication(true)` and `.invalidateHttpSession(true)`. |
-| D2-08 | PASS | `authorizeHttpRequests` permits exactly `/css/**`, `/js/**`, `/images/**`, and `/favicon.ico`. Form login routes are handled separately via `.formLogin(...).permitAll()`. |
-| LANG | PASS | Code comments and Javadoc are in Japanese; identifiers and string literals are in English. No other languages detected. |
-
-Overall PASS

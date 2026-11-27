@@ -1,5 +1,0 @@
-﻿Audit the attached KINTAI Spring Boot 4 / MyBatis services strictly for:
-1. Pessimistic locking (SELECT ... FOR UPDATE) serialization and deadlock prevention order.
-2. Transaction boundaries (@Transactional) and double-confirm overwrite guards.
-3. Tenant isolation (storeId / IDOR checks).
-Cite evidence using [RelativeFilePath:LineNumber] and end with 'VERDICT: PASS' or 'VERDICT: FAIL'.

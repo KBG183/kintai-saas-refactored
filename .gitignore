@@ -41,5 +41,6 @@ scratch/
 *_KO*
 docs/audit_runs/
 docs/daily_audit_temp.log
-audit/runs/**/context_bundle.txt
+audit/runs/*
+!audit/runs/.gitkeep
 

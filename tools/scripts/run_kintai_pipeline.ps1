@@ -254,9 +254,14 @@ if ($jobs.Count -gt 0) {
 # Harvest Qwen Results
 if ($jobs.ContainsKey("Qwen")) {
     $job = $jobs["Qwen"]
+    $jobState = $job.State
     $qwenExit = Receive-Job -Job $job
     Remove-Job -Job $job -Force
     $dur = [Math]::Round(((Get-Date) - $jobStartTimes["Qwen"]).TotalSeconds, 2)
+    
+    if ($jobState -ne "Completed") {
+        $failClosedReasons.Add("Local Qwen 27B background job terminated abnormally (JobState: $jobState).")
+    }
     
     if (Test-Path $qwenOutFile) {
         $aiReportFiles.Add($qwenOutFile)
@@ -305,6 +310,7 @@ if ($jobs.ContainsKey("Qwen")) {
 # Harvest Claude Results
 if ($jobs.ContainsKey("Claude")) {
     $job = $jobs["Claude"]
+    $jobState = $job.State
     $rawClaudeOutput = @(Receive-Job -Job $job)
     Remove-Job -Job $job -Force
     $dur = [Math]::Round(((Get-Date) - $jobStartTimes["Claude"]).TotalSeconds, 2)
@@ -315,16 +321,19 @@ if ($jobs.ContainsKey("Claude")) {
         if (Test-Path $rep) { $aiReportFiles.Add($rep) }
     }
     
-    $claudeExit = 0
+    $claudeExit = if ($jobState -ne "Completed") { 1 } else { 0 }
     if ($rawClaudeOutput.Count -gt 0) {
         $lastVal = $rawClaudeOutput[-1]
-        if ($lastVal -match '^\d+$') { $claudeExit = [int]$lastVal }
-        elseif ($rawClaudeOutput -match 'Verdict:\s*FAIL') { $claudeExit = 1 }
+        if ($lastVal -match '^\d+$') { 
+            $claudeExit = [int]$lastVal 
+        } elseif ($rawClaudeOutput -match '(?i)(Verdict:\s*FAIL|CLAUDE_API_ERROR|NativeCommandError|AUTH_ERROR|ERROR:|Exception)') { 
+            $claudeExit = 1 
+        }
     }
     
     if ($claudeExit -ne 0) {
-        $pipelineResults["Stage 3: Claude"] = "FAIL_CLOSED (${dur}s, exit code $claudeExit)"
-        $failClosedReasons.Add("Claude returned non-zero exit code $claudeExit.")
+        $pipelineResults["Stage 3: Claude"] = "FAIL_CLOSED (${dur}s, exit code $claudeExit, JobState: $jobState)"
+        $failClosedReasons.Add("Claude returned non-zero exit code $claudeExit or encountered execution failure (JobState: $jobState).")
     } else {
         $pipelineResults["Stage 3: Claude"] = "PASS (${dur}s)"
     }
@@ -333,6 +342,7 @@ if ($jobs.ContainsKey("Claude")) {
 # Harvest Codex Results
 if ($jobs.ContainsKey("Codex")) {
     $job = $jobs["Codex"]
+    $jobState = $job.State
     $rawCodexOutput = @(Receive-Job -Job $job)
     Remove-Job -Job $job -Force
     $dur = [Math]::Round(((Get-Date) - $jobStartTimes["Codex"]).TotalSeconds, 2)
@@ -343,16 +353,19 @@ if ($jobs.ContainsKey("Codex")) {
         if (Test-Path $rep) { $aiReportFiles.Add($rep) }
     }
     
-    $codexExit = 0
+    $codexExit = if ($jobState -ne "Completed") { 1 } else { 0 }
     if ($rawCodexOutput.Count -gt 0) {
         $lastVal = $rawCodexOutput[-1]
-        if ($lastVal -match '^\d+$') { $codexExit = [int]$lastVal }
-        elseif ($rawCodexOutput -match 'Verdict:\s*FAIL') { $codexExit = 1 }
+        if ($lastVal -match '^\d+$') { 
+            $codexExit = [int]$lastVal 
+        } elseif ($rawCodexOutput -match '(?i)(Verdict:\s*FAIL|NativeCommandError|AUTH_ERROR|ERROR:|Exception)') { 
+            $codexExit = 1 
+        }
     }
     
     if ($codexExit -ne 0) {
-        $pipelineResults["Stage 3: Codex"] = "FAIL_CLOSED (${dur}s, exit code $codexExit)"
-        $failClosedReasons.Add("Codex returned non-zero exit code $codexExit.")
+        $pipelineResults["Stage 3: Codex"] = "FAIL_CLOSED (${dur}s, exit code $codexExit, JobState: $jobState)"
+        $failClosedReasons.Add("Codex returned non-zero exit code $codexExit or encountered execution failure (JobState: $jobState).")
     } else {
         $pipelineResults["Stage 3: Codex"] = "PASS (${dur}s)"
     }

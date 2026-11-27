@@ -100,6 +100,15 @@ tasks.register('verifyZeroKorean') {
 				}
 			}
 		}
+		def buildGradleFile = file('build.gradle')
+		if (buildGradleFile.exists()) {
+			def lines = buildGradleFile.readLines('UTF-8')
+			for (int i = 0; i < lines.size(); i++) {
+				if (lines[i] =~ koreanPattern) {
+					violations.add("build.gradle:L${i + 1}: ${lines[i].trim()}")
+				}
+			}
+		}
 		if (!violations.isEmpty()) {
 			throw new GradleException("Zero-Korean gate failed:\n" + violations.join('\n'))
 		}
@@ -119,8 +128,9 @@ tasks.register('verifyDocumentParity') {
 		def dossierJa = file('docs/technical_audit_dossier.md')
 		def dossierKo = file('docs/technical_audit_dossier_KO.md')
 
-		if (!roadmapJa.exists() || !roadmapKo.exists() || !dossierJa.exists() || !dossierKo.exists()) {
-			throw new GradleException("verifyDocumentParity: One or more required audit documents are missing!")
+		def hasKo = roadmapKo.exists() && dossierKo.exists()
+		if (!roadmapJa.exists() || !dossierJa.exists()) {
+			throw new GradleException("verifyDocumentParity: Japanese canonical roadmap or dossier is missing!")
 		}
 
 		def extractDefectIds = { File f ->
@@ -148,7 +158,7 @@ tasks.register('verifyDocumentParity') {
 			f.readLines('UTF-8').each { line ->
 				if (line.contains('## 11.') || line.contains('Defect Remediation Ledger')) inLedger = true
 				else if (inLedger && line.startsWith('## 12.')) inLedger = false
-				else if (inLedger && line.startsWith('|') && !line.contains('欠陥分類') && !line.contains('결함 분류') && !line.contains('---')) {
+				else if (inLedger && line =~ /^\|\s*\*\*(Critical|High|Medium|Low)\*\*/) {
 					rows.add(line.trim())
 				}
 			}
@@ -163,37 +173,41 @@ tasks.register('verifyDocumentParity') {
 			logFile.append("[${timestamp}] [FAIL] [${gateName}] ${message}\n", 'UTF-8')
 		}
 
-		// 1. Roadmap JA vs KO ID parity
+		// 1. Roadmap JA vs KO ID parity (when KO local mirrors exist)
 		def roadmapJaIds = extractDefectIds(roadmapJa)
-		def roadmapKoIds = extractDefectIds(roadmapKo)
-		if (roadmapJaIds != roadmapKoIds) {
-			def missingInKo = roadmapJaIds - roadmapKoIds
-			def missingInJa = roadmapKoIds - roadmapJaIds
-			def errMsg = "verifyDocumentParity FAIL: Roadmap JA and KO defect IDs do not match! Missing in KO: ${missingInKo}, Missing in JA: ${missingInJa}"
-			logGateFailure('verifyDocumentParity', errMsg)
-			throw new GradleException(errMsg)
-		}
+		if (hasKo) {
+			def roadmapKoIds = extractDefectIds(roadmapKo)
+			if (roadmapJaIds != roadmapKoIds) {
+				def missingInKo = roadmapJaIds - roadmapKoIds
+				def missingInJa = roadmapKoIds - roadmapJaIds
+				def errMsg = "verifyDocumentParity FAIL: Roadmap JA and KO defect IDs do not match! Missing in KO: ${missingInKo}, Missing in JA: ${missingInJa}"
+				logGateFailure('verifyDocumentParity', errMsg)
+				throw new GradleException(errMsg)
+			}
 
-		// 2. Roadmap JA vs KO completed count parity
-		def checkedJa = extractCheckedCount(roadmapJa)
-		def checkedKo = extractCheckedCount(roadmapKo)
-		if (checkedJa != checkedKo) {
-			def errMsg = "verifyDocumentParity FAIL: Completed defect count [x] mismatch! JA: ${checkedJa}, KO: ${checkedKo}"
-			logGateFailure('verifyDocumentParity', errMsg)
-			throw new GradleException(errMsg)
-		}
+			// 2. Roadmap JA vs KO completed count parity
+			def checkedJa = extractCheckedCount(roadmapJa)
+			def checkedKo = extractCheckedCount(roadmapKo)
+			if (checkedJa != checkedKo) {
+				def errMsg = "verifyDocumentParity FAIL: Completed defect count [x] mismatch! JA: ${checkedJa}, KO: ${checkedKo}"
+				logGateFailure('verifyDocumentParity', errMsg)
+				throw new GradleException(errMsg)
+			}
 
-		// 3. Dossier JA vs KO row parity
-		def dossierJaRows = extractDossierLedgerRows(dossierJa)
-		def dossierKoRows = extractDossierLedgerRows(dossierKo)
-		if (dossierJaRows.size() != dossierKoRows.size()) {
-			def errMsg = "verifyDocumentParity FAIL: Dossier Section 11 ledger rows mismatch! JA rows: ${dossierJaRows.size()}, KO rows: ${dossierKoRows.size()}"
-			logGateFailure('verifyDocumentParity', errMsg)
-			throw new GradleException(errMsg)
+			// 3. Dossier JA vs KO row parity
+			def dossierJaRows = extractDossierLedgerRows(dossierJa)
+			def dossierKoRows = extractDossierLedgerRows(dossierKo)
+			if (dossierJaRows.size() != dossierKoRows.size()) {
+				def errMsg = "verifyDocumentParity FAIL: Dossier Section 11 ledger rows mismatch! JA rows: ${dossierJaRows.size()}, KO rows: ${dossierKoRows.size()}"
+				logGateFailure('verifyDocumentParity', errMsg)
+				throw new GradleException(errMsg)
+			}
 		}
 
 		// 4. Completed Roadmap defects (Day 1, Day 2) must all exist in Dossier
+		def dossierJaRows = extractDossierLedgerRows(dossierJa)
 		def dossierJaIds = extractDefectIds(dossierJa)
+		def checkedJa = extractCheckedCount(roadmapJa)
 		roadmapJa.readLines('UTF-8').each { line ->
 			if (line =~ /-\s*\[x\]\s*\*\*(DEFECT-D[12]-[0-9]+)\*\*/) {
 				def id = (line =~ /DEFECT-D[12]-[0-9]+/)[0]
@@ -205,6 +219,10 @@ tasks.register('verifyDocumentParity') {
 			}
 		}
 
-		println "verifyDocumentParity PASS: Roadmap IDs (${roadmapJaIds.size()}), Completed [x] (${checkedJa}), Dossier Rows (${dossierJaRows.size()}) perfectly synchronized."
+		if (hasKo) {
+			println "verifyDocumentParity PASS: Roadmap IDs (${roadmapJaIds.size()}), Completed [x] (${checkedJa}), Dossier Rows (${dossierJaRows.size()}) perfectly synchronized (Local Full Parity)."
+		} else {
+			println "verifyDocumentParity PASS: CI Canonical Mode - Roadmap IDs (${roadmapJaIds.size()}), Completed [x] (${checkedJa}) verified against Dossier Rows (${dossierJaRows.size()})."
+		}
 	}
 }
