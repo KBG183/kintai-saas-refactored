@@ -43,9 +43,9 @@
 - [x] **DEFECT-D1-03**: `PayrollService.java:148-161` - 月中時給変更時、月60時間超25%追加割増が全スキップされる不具合の是正（発生日契約時給基準のクロノロジカル加算）。
 - [x] **DEFECT-D1-04**: `PayrollApiController`, `AttendanceApiController` - セッション店舗ID未検証およびハードコードフォールバックによるIDOR脆弱性防御（`@AuthenticationPrincipal` 必須化）。
 - [x] **DEFECT-D1-05**: `SecurityConfig.java:32-33` - `/api/**` に対する CSRF 保護全面無効化の是正（`CookieCsrfTokenRepository` 適用）。
-- [x] **DEFECT-D1-06**: `audit/runs/` - `.gitignore` 除外による多層検証領収書の物理消失防止（Git追跡化）。
+- [x] **DEFECT-D1-06**: `audit/runs/` - `.gitignore` 除外によるローカル保管へ統一（ローカルパス・内部IPの公開リポジトリ流出防止）。
 - [x] **DEFECT-D1-07**: `PayrollService.java:201-260` - 非ロック状態での給与確定によるレースコンディション是正（`findByIdForUpdate` 先行行ロック獲得）。
-- [x] **DEFECT-D1-08**: `application.yaml:8-9` - DB パスワード平文露出の是正（環境変数 `${DB_PASSWORD:1234}` 化）。
+- [x] **DEFECT-D1-08**: `application.yaml:8-9` - DB パスワード平文露出の是正（環境変数 `${DB_USER}`, `${DB_PASSWORD}` 必須化）。
 - [x] **DEFECT-D1-09**: `README.md` / `sprint_roadmap_plan.md` - 設計ドキュメントと実機DDL・ポートの不一致解消。
 - [x] **DEFECT-D1-10**: `SecurityConfig.java:44` - `/members/sample` の `permitAll` 設定による会員情報露出リスクの是正（`ROLE_OWNER` 専用化）。
 

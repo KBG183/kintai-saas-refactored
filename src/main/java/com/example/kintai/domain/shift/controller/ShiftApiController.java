@@ -80,7 +80,7 @@ public class ShiftApiController {
                 && !"ROLE_OWNER".equalsIgnoreCase(userDetails.getRole()))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "シフト確定は管理者権限が必要です。");
         }
-        shiftService.confirmShift(shiftId, confirmDto);
+        shiftService.confirmShift(shiftId, confirmDto, userDetails.getStoreId());
         return ResponseEntity.ok(ApiResponse.ok("シフトが確定されました。", null));
     }
 }

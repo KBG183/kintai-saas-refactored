@@ -44,7 +44,7 @@ flowchart TD
 | **時間外労働** | +25% (計125%) | 1日8時間（480分）を超過した労働時間 | `overtimeAllowance = yenRound(wage * 0.25 * otMinutes / 60)` |
 | **深夜労働** | +25% (計125%) | 22:00 〜 翌05:00 の実労働時間 | `nightAllowance = yenRound(wage * 0.25 * nightMinutes / 60)` |
 | **深夜時間外労働** | +50% (計150%) | 深夜時間帯と時間外労働が重複する時間 | `nightAllowance(+25%)` + `overtimeAllowance(+25%)` の加算方式 |
-| **法定休日労働** | +35% (計135%) | 週1回または4週4日の法定休日の労働 | `holidayAllowance = yenRound(wage * 0.35 * netMinutes / 60)` |
+| **法定休日労働** | +35% (計135%) | 週1回または4週4日の法定休日の労働 | `holidayAllowance = yenRound(wage * 0.35 * netMinutes / 60)`（法定休日は設定値 `kintai.payroll.statutory-holiday-day-of-week`（既定: 日曜）の曜日で判定。祝日カレンダー・個別指定UIは未実装。`PayrollServiceTest` で検証） |
 | **休日深夜労働** | +60% (計160%) | 法定休日かつ深夜（22:00〜05:00）の労働 | 休日35% + 深夜25% の重複加算（労基法第37条・通達に基づき時間外25%を完全免除し、`effectiveOvertimeMinutes = 0` で制御） |
 | **月60h超時間外** | +25% (計150%/175%) | 月間累計時間外労働が60時間（3,600分）を超過 | 月中時給変更時も発生日の契約時給に基づきクロノロジカルに加算 |
 
@@ -175,7 +175,7 @@ Phase 3 初期形（`fc5120d`）において検出された全重大欠陥の是
 | **High** | 2026-11-26<br>(Day 1 DEFECT-D1-05) | `SecurityConfig.java:32-33` | `/api/**` に対する CSRF 保護の全機能停止 | `CookieCsrfTokenRepository` 適用および Fetch API ヘッダー連携 | 2026-11-27<br>(5層パイプライン) | **PASS** |
 | **High** | 2026-11-27<br>(Day 1 DEFECT-D1-06) | `audit/runs/` | `.gitignore` 除外により5層検証の物理的証拠が消失 | `.gitignore` ルール撤廃、マスター検証パイプライン実行および領収書永続化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
 | **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-07) | `PayrollService.java:201-260` | 非ロック状態での確定・支払判定によるレースコンディション | `findByIdForUpdate` 先行行ロック獲得後の状態判定フローへ再構築 | 2026-11-27<br>(5層パイプライン) | **PASS** |
-| **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-08) | `application.yaml:8-9` | `root/1234` DBパスワードの平文露出 | `${DB_USER:root}`, `${DB_PASSWORD:1234}` 環境変数化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
+| **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-08) | `application.yaml:8-9` | `root/1234` DBパスワードの平文露出 | `${DB_USER}`, `${DB_PASSWORD}` 環境変数必須化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
 | **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-09) | `README.md` / `sprint_roadmap_plan.md` | ER図テーブル名相違、ポート相違、マイルストーン表記衝突 | 実装DDLおよび設定値への完全同期、ロードマップ進捗の整合化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
 | **Medium** | 2026-11-27<br>(Day 1 DEFECT-D1-10) | `SecurityConfig.java:44` | `/members/sample` が `permitAll` 設定され、会員情報露出リスク | 公開パスから除外、`/members/**` を `ROLE_OWNER` 専用へ厳格化 | 2026-11-27<br>(5層パイプライン) | **PASS** |
 | **High** | 2026-11-27<br>(Day 2 監査 DEFECT-D2-01) | `SecurityConfig.java:62` | `maxSessionsPreventsLogin(false)` による既存打刻セッション強制切断リスク | `maxSessionsPreventsLogin(true)` への改修および後続重複ログイン遮断 | 2026-11-27<br>(決定論的ゲート) | **PASS** |
@@ -207,7 +207,7 @@ Phase 3 初期形（`fc5120d`）において検出された全重大欠陥の是
 | **08** | 2026-11-27 12:20 | Day 2 セキュリティ設定監査 | Local Qwen 27B (RTX 5070 Ti) | 64.26s | 1,809 | 3,223 | 50.9 tps | **PASS** | `docs/audit_runs/.../20261127_031921_ef825d9c` |
 | **09** | 2026-11-27 12:26 | Day 2 5層統合パイプライン | 5-Tier Hybrid (Gradle/Qwen/Cross) | 304.30s | 19,722 | 1,681 | 46.5 tps | **PASS** | `audit/runs/20261127_122120_kintai_master_5b9d7476` |
 | **10** | 2026-11-27 15:01 | Day 2 3者完全並行Fan-out検証 | Local Qwen 27B (RTX 5070 Ti) | 20.44s | 6,783 | 858 | 49.9 tps | **PASS** | `audit/runs/20261127_150118_kintai_master_01aa0d50` |
-| **11** | 2026-11-27 15:06 | Day 2 決定論的ゲート全数通過 | Gradle 9.8.1 / JUnit 5 / 字母拡張 | 23.00s | — | — | — | **PASS** | `BUILD SUCCESSFUL (22 tests)` |
+| **11** | 2026-11-27 15:06 | Day 2 決定論的ゲート全数通過 | Gradle 9.8.1 / JUnit 5 / 字母拡張 | 23.00s | — | — | — | **PASS** | `BUILD SUCCESSFUL (36 tests)` |
 
 ---
 

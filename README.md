@@ -213,13 +213,18 @@ cd kintai-saas-refactored
 ```
 
 ### 2. データベース設定
-`src/main/resources/application.yaml` に MySQL 接続情報を設定します（環境変数による上書きにも対応）。
+`src/main/resources/application.yaml` に MySQL 接続情報を設定します。本番環境およびローカル起動時は環境変数により設定値を注入します。
+```bash
+# データベース接続用環境変数の設定例 (Bash)
+export DB_USER=your_db_username
+export DB_PASSWORD=your_db_password
+```
 ```yaml
 spring:
   datasource:
     url: jdbc:mysql://localhost:3306/kintai_db?useSSL=false&serverTimezone=Asia/Tokyo&characterEncoding=UTF-8
-    username: ${DB_USER:root}
-    password: ${DB_PASSWORD:1234}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
 ```
 
 ### 3. ビルドおよび品質検証

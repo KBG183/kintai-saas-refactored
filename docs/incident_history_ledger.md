@@ -56,5 +56,5 @@
      - ロードマップ完了欠陥の実証書テーブル実在検証（ID未存在時は即座にビルド遮断）
 - **物理的検証証拠 (Evidence)**:
   - `./gradlew verifyDocumentParity`: PASS (`BUILD SUCCESSFUL`)
-  - `./gradlew check`: 全7タスク正常通過（`verifyDocumentParity`, `verifyZeroKorean`, `verifyMyBatisSqlSafety`, JUnit 5 22テスト全数通過）
+  - `./gradlew check`: 全7タスク正常通過（`verifyDocumentParity`, `verifyZeroKorean`, `verifyMyBatisSqlSafety`, JUnit 5 36テスト全数通過）
 - **ステータス**: `RESOLVED / DETERMINISTIC_GATE_ESTABLISHED`

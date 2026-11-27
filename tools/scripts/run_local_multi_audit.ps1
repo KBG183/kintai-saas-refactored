@@ -152,7 +152,7 @@ foreach ($tf in $targetFiles) {
 }
 
 # 3. Execution of Active Roles via audit_with_hermes.ps1
-$auditScript = "C:\Users\klad3\.gemini\scripts\audit_with_hermes.ps1"
+$auditScript = Join-Path $env:USERPROFILE ".gemini\scripts\audit_with_hermes.ps1"
 if (-not (Test-Path $auditScript)) {
     throw "Global audit script not found: $auditScript"
 }
